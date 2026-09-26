@@ -1,0 +1,36 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: comfyui
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  # - ingress.yaml
+
+images:
+  - name: dreamer-mcp
+    newName: docker.io/djavanryuuzaki/dreamer-mcp
+    newTag: "0.1.0"
+
+configMapGenerator:
+  # Your API-format workflows + workflows.yaml. A change generates a new name -> automatic rollout.
+  - name: dreamer-mcp-workflows
+    files:
+      - workflows/workflows.yaml
+      - workflows/txt2img.json
+      - workflows/upscale.json
+  - name: dreamer-mcp-config
+    literals:
+      - COMFYUI_URL=http://comfyui.comfyui.svc.cluster.local:8188
+      # Public URL of this MCP (host in ingress.yaml): enables /media — outputs become signed,
+      # expiring links streamed by the MCP (with a player page); ComfyUI stays internal.
+      - MCP_PUBLIC_URL=https://dreamer-mcp.example.com
+      - MEDIA_LINK_TTL=86400
+      - WORKFLOWS_FROM_COMFYUI=true
+      - LOG_LEVEL=INFO
+
+secretGenerator:
+  # Create secret.env with: MCP_AUTH_TOKEN=<openssl rand -hex 32>  (do not commit it)
+  - name: dreamer-mcp-secret
+    envs:
+      - secret.env

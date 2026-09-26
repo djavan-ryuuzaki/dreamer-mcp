@@ -1,0 +1,12 @@
+presets:
+  image: txt2img
+workflows:
+  txt2img:
+    file: txt2img.json
+    params:
+      prompt:          {target: "6.text", type: string}
+      negative_prompt: {target: "7.text", type: string}
+      width:           {target: "5.width", type: int}
+      height:          {target: "5.height", type: int}
+      seed:            {target: "3.seed", type: seed}
+      steps:           {target: "3.steps", type: int}

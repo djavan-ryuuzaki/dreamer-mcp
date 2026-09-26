@@ -1,0 +1,22 @@
+# Optional: expose the MCP outside the cluster (for Claude Desktop/Code on your machine).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dreamer-mcp
+  annotations:
+    # nginx: long generations with wait=true need a large timeout
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "900"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: dreamer-mcp.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: dreamer-mcp, port: {name: http}}
+  # tls:
+  #   - hosts: [dreamer-mcp.example.com]
+  #     secretName: dreamer-mcp-tls

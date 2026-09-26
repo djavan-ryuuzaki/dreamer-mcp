@@ -1,0 +1,198 @@
+# Manifest for the MCP workflows.
+#
+# - Every *.json in this folder is a workflow in ComfyUI API format
+#   (in ComfyUI: Workflow > Export (API)). Files not listed here still show up in
+#   comfyui_workflows under their file name and can be run with raw `inputs`.
+# - Here you give each workflow friendly params and pick the presets used by
+#   comfyui_generate_image / comfyui_upscale / comfyui_generate_video / comfyui_generate_audio.
+#
+# Param target:  "<node id or title>.<input>"   e.g. "6.text" or "Positive Prompt.text"
+#                (a list of targets writes the same value to several nodes)
+# Param types:   auto | string | int | float | bool | seed | file
+#   seed -> random when not provided (or "random" / -1)
+#   file -> accepts URL / data URI / base64 / file name; uploaded to ComfyUI automatically
+# file: can also point to a workflow saved in ComfyUI:  file: "comfyui:my-folder/flux.json"
+
+presets:
+  image: generate_image
+  asset: generate_asset
+  upscale: null # e.g. upscale (needs RealESRGAN_x4plus.pth in models/upscale_models)
+  video: minimax_h3_r2v
+  audio: yue2_music
+
+workflows:
+  generate_image:
+    # From the UI workflow GENERATE_IMAGE.json (converted with comfyui_convert_workflow).
+    # Inputs are the nodes titled [$NAME]. No images -> text-to-image; 1..9 images -> edit.
+    # Two outputs: the base image (SaveImage 160) and a 1.5x upscaled pass (SaveImage 118).
+    file: "comfyui:api/generate_image.json"
+    description: Qwen Image 2.1 generate (no images) or edit (1-9 reference images) at any width/height; returns the base image and an upscaled version
+    outputs:                     # label returned with each file
+      base: "160"
+      upscale: "118"
+    size:                        # when width/height are not given
+      aspect_ratio: aspect_ratio # + megapixels -> pixels (e.g. 16:9 @ 1 MP = 1360x768)
+      megapixels: megapixels
+      from_image: images         # editing without any size: exact size of <image1>
+      max_side: 1536
+    params:
+      prompt:          {target: "[$PROMPT].value", type: string, description: "Refer to the images as <image1>, <image2>..."}
+      images:
+        target: ["[$IMAGEM_0].image", "[$IMAGEM_1].image", "[$IMAGEM_2].image", "[$IMAGEM_3].image", "[$IMAGEM_4].image", "[$IMAGEM_5].image", "[$IMAGEM_6].image", "[$IMAGEM_7].image", "[$IMAGEM_8].image"]
+        type: file_list
+        prune_missing: true      # unused LoadImage slots are removed from the graph
+        flatten_alpha: "#ffffff" # transparent PNGs are composited onto white first
+        description: 0-9 images (URL, base64 or ComfyUI input filename), in <image1>.. order
+      width:           {target: "[$WIDTH].value", type: int, default: 1024, multiple_of: 16, description: "Pixels (overrides aspect_ratio/megapixels)"}
+      height:          {target: "[$HEIGHT].value", type: int, default: 1024, multiple_of: 16}
+      aspect_ratio:    {type: string, description: "e.g. 16:9, 3:4, 21:9, 5:4 or 1.5; converted to width/height"}
+      megapixels:      {type: float, description: "Image area, 1.0 = ~1024x1024 (default 1.0)"}
+      keep_resolution: {target: "[$MANTER_RESOLUCAO].value", type: bool, description: "Editing: let the encoder size the image from <image1> (~1 MP) instead of width/height"}
+      upscale:         {remove_when_false: ["118"], type: bool, default: true, description: "Also return the upscaled image"}
+      save_base:       {remove_when_false: ["160"], type: bool, default: true, description: "Also return the base image"}
+      upscale_factor:  {target: "155.scale_by", type: float, description: "Upscale factor (default 1.5)"}
+      seed:            {target: ["62.seed", "115.seed"], type: seed}
+    when_missing:
+      # No images: nothing for the encoder to size from, so use [$WIDTH]/[$HEIGHT]
+      images: {"[$MANTER_RESOLUCAO].value": false}
+    when_set:
+      # Any explicit or derived size means "use [$WIDTH]/[$HEIGHT]", not the encoder's latent
+      width: {"[$MANTER_RESOLUCAO].value": false}
+      height: {"[$MANTER_RESOLUCAO].value": false}
+
+  generate_asset:
+    # From the UI workflow GENERATE_ASSET.json: same generate/edit graph as generate_image, but
+    # the size is given in pixels ([$WIDTH]/[$HEIGHT]) and the prompt asks for a transparent
+    # background.
+    file: "comfyui:api/generate_asset.json"
+    description: Qwen Image 2.1 asset (object/sprite/icon) with transparent background; exact width/height or the size of <image1>
+    outputs:
+      base: "160"
+      upscale: "118"
+    size:                        # editing without width/height: use the size of <image1>
+      from_image: images
+      max_side: 1536             # larger inputs are scaled down (keeps VRAM/time sane)
+    trim_alpha:                  # also return copies cropped to the object (+ padding)
+      outputs: [base, upscale]
+      padding: 16
+      param: trim
+    params:
+      prompt:
+        target: "[$PROMPT].value"
+        type: string
+        description: "Describe the asset; refer to images as <image1>, <image2>..."
+        append_when:
+          transparent: "This is an RGBA image with transparency. The image has an alpha channel and the background is transparent."
+      transparent:     {type: bool, default: true, description: "Ask for a transparent background (the PNG has a real alpha channel)"}
+      upscale_prompt:
+        target: "123.prompt"
+        type: string
+        default: "<image1> Preserve all elements in the image. And up sampling to higher resolutions."
+        append_when:
+          transparent: "Keep the transparent background. This is an RGBA image with transparency. The image has an alpha channel and the background is transparent."
+      images:
+        target: ["[$IMAGEM_0].image", "[$IMAGEM_1].image", "[$IMAGEM_2].image", "[$IMAGEM_3].image", "[$IMAGEM_4].image", "[$IMAGEM_5].image", "[$IMAGEM_6].image", "[$IMAGEM_7].image", "[$IMAGEM_8].image"]
+        type: file_list
+        prune_missing: true
+        flatten_alpha: "#ffffff" # LoadImage drops alpha; don't let hidden colors leak into the edit
+        description: 0-9 images (URL, base64 or ComfyUI input filename), in <image1>.. order
+      width:           {target: "[$WIDTH].value", type: int, default: 1024, multiple_of: 16, description: "Pixels; when editing defaults to the size of <image1>"}
+      height:          {target: "[$HEIGHT].value", type: int, default: 1024, multiple_of: 16}
+      trim:            {type: bool, default: true, description: "Also return copies cropped to the object"}
+      keep_resolution: {target: "[$MANTER_RESOLUCAO].value", type: bool, description: "Editing: keep the size of <image1>"}
+      upscale:         {remove_when_false: ["118"], type: bool, default: true, description: "Also return the upscaled image"}
+      save_base:       {remove_when_false: ["160"], type: bool, default: true, description: "Also return the base image"}
+      upscale_factor:  {target: "155.scale_by", type: float}
+      seed:            {target: ["62.seed", "115.seed"], type: seed}
+    when_missing:
+      images: {"[$MANTER_RESOLUCAO].value": false}
+    when_set:
+      width: {"[$MANTER_RESOLUCAO].value": false}
+      height: {"[$MANTER_RESOLUCAO].value": false}
+
+  qwen_image:
+    # Saved from ComfyUI history with comfyui_save_workflow. Ids like "459:452" are nodes inside a subgraph.
+    file: "comfyui:api/qwen_image_t2i.json"
+    description: Qwen Image 2.1 text-to-image (~1 MP, ~35 s on an RTX 3060)
+    params:
+      prompt:          {target: "459:452.prompt", type: string, description: Positive prompt}
+      negative_prompt: {target: "459:452.negative_prompt", type: string}
+      aspect_ratio:    {target: "13.aspect_ratio", type: string, description: "e.g. '1:1 (Square)', '16:9 (Widescreen)'"}
+      megapixels:      {target: "13.megapixels", type: float}
+      seed:            {target: "459:458.seed", type: seed}
+      steps:           {target: "459:458.steps", type: int}
+      cfg:             {target: "459:458.cfg", type: float}
+      batch_size:      {target: "459:456.batch_size", type: int}
+
+  minimax_h3_r2v:
+    # Saved from history. Reference-to-video with audio: in the prompt, call the images <Picture 1> and <Picture 2>.
+    file: "comfyui:api/minimax_h3_r2v.json"
+    description: MiniMax H3 reference-to-video with sound (2 reference images + prompt)
+    params:
+      prompt:       {target: "138.value", type: string, description: "Scene description; refer to the images as <Picture 1> and <Picture 2>"}
+      image:        {target: "137.image", type: file, description: "<Picture 1>"}
+      image2:       {target: "139.image", type: file, description: "<Picture 2>"}
+      duration:     {target: "132.value", type: float, description: Seconds (frames are computed at 24 fps)}
+      aspect_ratio: {target: "115.aspect_ratio", type: string, description: "e.g. '16:9 (Widescreen)', '9:16 (Portrait)'"}
+      megapixels:   {target: "115.megapixels", type: float}
+      seed:         {target: "129.noise_seed", type: seed}
+      lightning:    {target: "146.value", type: bool, description: "Fast 3-step Lightning LoRA (true) or full quality (false)"}
+      steps:        {target: "143.value", type: int, description: Steps when lightning=false}
+
+  yue2_music:
+    # Saved from history. Plans the song in ABC notation first, then generates the audio (~1 min).
+    file: "comfyui:api/yue2_text2music.json"
+    description: YuE2 text-to-music with vocals (style + lyrics -> FLAC)
+    params:
+      prompt:       {target: "33:36.value", type: string, description: "Musical style: genre, voice, instruments, mood"}
+      lyrics:       {target: "33:37.value", type: string, description: "Lyrics with [Verse]/[Chorus] sections"}
+      duration:     {target: "33:25.max_duration", type: float, description: Maximum length in seconds (the song may be shorter)}
+      seed:         {target: "33:34.seed", type: seed}
+      steps:        {target: "33:8.steps", type: int}
+      abc_planning: {target: "33:31.value", type: bool, description: Plan the melody in ABC notation first (better structure)}
+      format:       {target: "10.format", type: string, description: "flac, mp3, wav..."}
+
+  txt2img:
+    file: txt2img.json
+    description: Text-to-image SD 1.5 (example — replace with your own workflow)
+    params:
+      prompt:          {target: "6.text", type: string, description: Positive prompt}
+      negative_prompt: {target: "7.text", type: string}
+      width:           {target: "5.width", type: int}
+      height:          {target: "5.height", type: int}
+      batch_size:      {target: "5.batch_size", type: int}
+      seed:            {target: "3.seed", type: seed}
+      steps:           {target: "3.steps", type: int}
+      cfg:             {target: "3.cfg", type: float}
+      checkpoint:      {target: "4.ckpt_name", type: string, description: File from comfyui_models checkpoints}
+
+  upscale:
+    file: upscale.json
+    description: 4x RealESRGAN followed by a resize (scale = final factor / 4)
+    params:
+      image: {target: "1.image", type: file}
+      scale: {target: "4.scale_by", type: float, description: "Multiplier after the 4x model; 0.5 = 2x final, 1.0 = 4x final"}
+      model: {target: "2.model_name", type: string}
+
+  # --- Video example (Wan 2.x text/image-to-video). Export your workflow and adjust the ids.
+  # wan_t2v:
+  #   file: wan_t2v.json
+  #   description: Wan 2.2 text-to-video
+  #   params:
+  #     prompt:          {target: "6.text", type: string}
+  #     negative_prompt: {target: "7.text", type: string}
+  #     image:           {target: "52.image", type: file}
+  #     width:           {target: "55.width", type: int}
+  #     height:          {target: "55.height", type: int}
+  #     length:          {target: "55.length", type: int}
+  #     fps:             {target: "57.fps", type: int}
+  #     seed:            {target: "3.seed", type: seed}
+  #
+  # --- Audio example (ACE-Step / Stable Audio)
+  # ace_step:
+  #   file: ace_step.json
+  #   params:
+  #     prompt:   {target: "14.tags", type: string}
+  #     lyrics:   {target: "14.lyrics", type: string}
+  #     duration: {target: "17.seconds", type: float}
+  #     seed:     {target: "52.seed", type: seed}

@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dreamer-mcp
+  labels: {app.kubernetes.io/name: dreamer-mcp}
+spec:
+  replicas: 1   # stateless (stateless HTTP); can be scaled out
+  selector:
+    matchLabels: {app.kubernetes.io/name: dreamer-mcp}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: dreamer-mcp}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: dreamer-mcp
+          image: dreamer-mcp
+          ports:
+            - {name: http, containerPort: 8000}
+          envFrom:
+            - configMapRef: {name: dreamer-mcp-config}
+            - secretRef: {name: dreamer-mcp-secret}
+          env:
+            - {name: WORKFLOWS_DIR, value: /workflows}
+          volumeMounts:
+            - {name: workflows, mountPath: /workflows, readOnly: true}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 30
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {memory: 384Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+      volumes:
+        - name: workflows
+          configMap: {name: dreamer-mcp-workflows}
