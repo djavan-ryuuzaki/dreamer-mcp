@@ -46,7 +46,7 @@ jobs:
       - uses: docker/login-action@v3
         if: github.event_name != 'pull_request'
         with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
+          username: ${{ vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME || 'djavanryuuzaki' }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - id: meta
         uses: docker/metadata-action@v5
@@ -74,7 +74,7 @@ jobs:
         continue-on-error: true
         uses: peter-evans/dockerhub-description@v4
         with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
+          username: ${{ vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME || 'djavanryuuzaki' }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: ${{ vars.DOCKERHUB_USERNAME || 'djavanryuuzaki' }}/dreamer-mcp
           short-description: "MCP server for a remote ComfyUI: images, transparent assets, video and audio"
