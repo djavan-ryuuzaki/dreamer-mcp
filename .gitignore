@@ -8,3 +8,6 @@ dist/
 
 # Local notes (not published)
 README-LOCAL.md
+
+# Your own cluster overlay (hostnames, namespace)
+deploy/local/

@@ -46,10 +46,14 @@ def build_http_app() -> ASGIApp:
 
     s = get_settings()
     # Stateless: every request is independent, so the Deployment can scale to N replicas.
+    # Not JSON-only: a tool that waits streams its progress over SSE (see server._wait), which
+    # also keeps long generations alive behind proxies. Quick answers still come as plain JSON.
+    # Stateless means a `notifications/cancelled` POST cannot reach a running call; a client
+    # cancels by closing the response stream, which cancels the tool (and its ComfyUI job).
     app: ASGIApp = mcp.streamable_http_app(
         streamable_http_path=s.mcp_path,
         stateless_http=True,
-        json_response=True,
+        json_response=False,
         host=s.mcp_host,
     )
     if s.mcp_auth_token:
