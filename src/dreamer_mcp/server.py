@@ -10,7 +10,8 @@ import time
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from mcp.server.mcpserver import Image, MCPServer
+import anyio
+from mcp.server.mcpserver import Context, Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ResourceLink, ToolAnnotations
 from PIL import Image as PILImage
@@ -48,6 +49,7 @@ If a preset fails because a node or model is missing, comfyui_requirements lists
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 DONE = {"success", "error", "interrupted"}
+POLL_DELAY_MAX = 3.0  # seconds between polls of a job, so progress goes out at least this often
 NON_MODEL_FOLDERS = {"custom_nodes"}
 SAVED_WORKFLOWS_SUBDIR = "api"
 READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
@@ -189,23 +191,61 @@ async def _job_status(prompt_id: str, include_temp: bool = False) -> dict[str, A
     pending = sorted(q.get("queue_pending", []), key=lambda item: item[0])
     for pos, item in enumerate(pending, start=1):
         if item[1] == prompt_id:
-            return {"prompt_id": prompt_id, "status": "pending", "queue_position": pos}
+            return {"prompt_id": prompt_id, "status": "pending", "queue_position": pos,
+                    "queue_size": len(pending)}
     return {"prompt_id": prompt_id, "status": "not_found"}
 
 
-async def _wait(prompt_id: str, timeout: int) -> dict[str, Any]:
-    deadline = time.monotonic() + timeout
+def _progress_message(status: dict[str, Any]) -> str:
+    if status["status"] == "pending":
+        position = status.get("queue_position")
+        total = status.get("queue_size")
+        return f"queued, position {position} of {total}" if total else f"queued, position {position}"
+    return status["status"]
+
+
+async def _cancel_job(prompt_id: str) -> dict[str, Any]:
+    """Remove a job from the queue if pending, interrupt it if running."""
+    c = client()
+    status = await _job_status(prompt_id)
+    if status["status"] == "pending":
+        await c.delete_from_queue([prompt_id])
+        return {"prompt_id": prompt_id, "cancelled": True, "was": "pending"}
+    if status["status"] == "running":
+        await c.interrupt(prompt_id)
+        return {"prompt_id": prompt_id, "cancelled": True, "was": "running"}
+    return {"prompt_id": prompt_id, "cancelled": False, "status": status["status"]}
+
+
+async def _wait(prompt_id: str, timeout: int, ctx: Context | None = None) -> dict[str, Any]:
+    """Poll the job until it is done or `timeout` passes. Every poll is reported as MCP progress
+    (seconds waited, with the queue position or state), which also keeps the response stream alive
+    through proxies. If the MCP call is cancelled (notifications/cancelled or the client going
+    away), the ComfyUI job is cancelled too."""
+    started = time.monotonic()
+    deadline = started + timeout
     delay = 0.5
-    while True:
-        status = await _job_status(prompt_id)
-        if status["status"] in DONE or time.monotonic() >= deadline:
-            if status["status"] not in DONE:
-                status["note"] = (
-                    f"Still {status['status']} after {timeout}s; poll comfyui_job_status later."
-                )
-            return status
-        await asyncio.sleep(delay)
-        delay = min(delay * 1.5, 3.0)
+    try:
+        while True:
+            status = await _job_status(prompt_id)
+            if status["status"] in DONE or time.monotonic() >= deadline:
+                if status["status"] not in DONE:
+                    status["note"] = (
+                        f"Still {status['status']} after {timeout}s; poll comfyui_job_status later."
+                    )
+                return status
+            if ctx is not None:
+                await ctx.report_progress(round(time.monotonic() - started, 3),
+                                          message=_progress_message(status))
+            await asyncio.sleep(delay)
+            delay = min(delay * 1.5, POLL_DELAY_MAX)
+    except anyio.get_cancelled_exc_class():
+        with anyio.CancelScope(shield=True):
+            try:
+                await _cancel_job(prompt_id)
+            except ComfyUIError:
+                pass  # the call is over either way
+        raise
 
 
 async def _previews(outputs: list[dict], limit: int = 4) -> list[Image]:
@@ -230,6 +270,7 @@ async def _execute(
     wait: bool = False,
     timeout: int | None = None,
     preview: bool = False,
+    ctx: Context | None = None,
 ) -> list[Any]:
     reg = registry()
     if workflow_json is not None:
@@ -255,7 +296,7 @@ async def _execute(
         result["status"] = "queued"
         return [result]
 
-    result.update(await _wait(prompt_id, timeout or get_settings().default_wait_timeout))
+    result.update(await _wait(prompt_id, timeout or get_settings().default_wait_timeout, ctx))
     if result.get("status") == "success" and entry.trim_alpha:
         result["outputs"] = result.get("outputs", []) + await _trim_outputs(
             entry, applied, result.get("outputs", []))
@@ -457,6 +498,7 @@ async def comfyui_run(
     wait: bool = False,
     timeout: int | None = None,
     preview: bool = False,
+    ctx: Context | None = None,
 ) -> list[Any]:
     """Queue a workflow on ComfyUI.
 
@@ -474,7 +516,7 @@ async def comfyui_run(
     """
     return await _execute(workflow, params=params, inputs=inputs, workflow_json=workflow_json,
                           randomize_seed=randomize_seed, wait=wait, timeout=timeout,
-                          preview=preview)
+                          preview=preview, ctx=ctx)
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -620,18 +662,10 @@ async def comfyui_view_image(
 async def comfyui_cancel(prompt_id: str | None = None) -> dict[str, Any]:
     """Cancel a job: removes it from the queue if pending, interrupts it if running.
     Without prompt_id, interrupts whatever is running now."""
-    c = client()
     if not prompt_id:
-        await c.interrupt()
+        await client().interrupt()
         return {"cancelled": "current"}
-    status = await _job_status(prompt_id)
-    if status["status"] == "pending":
-        await c.delete_from_queue([prompt_id])
-        return {"prompt_id": prompt_id, "cancelled": True, "was": "pending"}
-    if status["status"] == "running":
-        await c.interrupt(prompt_id)
-        return {"prompt_id": prompt_id, "cancelled": True, "was": "running"}
-    return {"prompt_id": prompt_id, "cancelled": False, "status": status["status"]}
+    return await _cancel_job(prompt_id)
 
 
 @mcp.tool()
@@ -690,6 +724,7 @@ async def comfyui_generate_image(
     wait: bool = True,
     timeout: int | None = None,
     preview: bool = True,
+    ctx: Context | None = None,
 ) -> list[Any]:
     """Generate or edit images with the default image workflow (preset "image").
     Without `images` it generates from the prompt. With `images` (URLs, base64, or ComfyUI
@@ -709,7 +744,7 @@ async def comfyui_generate_image(
          "width": width, "height": height, "aspect_ratio": aspect_ratio,
          "megapixels": megapixels, "upscale": upscale, "seed": seed,
          "steps": steps, "cfg": cfg, "batch_size": batch_size},
-        extra, wait=wait, timeout=timeout, preview=preview,
+        extra, wait=wait, timeout=timeout, preview=preview, ctx=ctx,
     )
 
 
@@ -729,6 +764,7 @@ async def comfyui_generate_asset(
     wait: bool = True,
     timeout: int | None = None,
     preview: bool = True,
+    ctx: Context | None = None,
 ) -> list[Any]:
     """Generate or edit a single asset (object, sprite, icon, character cut-out) as a PNG with a
     transparent background, using the default asset workflow (preset "asset").
@@ -747,7 +783,7 @@ async def comfyui_generate_asset(
         "asset", workflow,
         {"prompt": prompt, "images": images or None, "width": width, "height": height,
          "transparent": transparent, "upscale": upscale, "trim": trim, "seed": seed},
-        extra, wait=wait, timeout=timeout, preview=preview,
+        extra, wait=wait, timeout=timeout, preview=preview, ctx=ctx,
     )
 
 
@@ -761,6 +797,7 @@ async def comfyui_upscale(
     wait: bool = True,
     timeout: int | None = None,
     preview: bool = True,
+    ctx: Context | None = None,
 ) -> list[Any]:
     """Upscale an image with the default upscale workflow (preset "upscale").
 
@@ -770,7 +807,7 @@ async def comfyui_upscale(
     Empty arguments keep the workflow's own values. `extra` sets more workflow params or raw
     "<node>.<input>" overrides; `workflow` swaps the preset for another workflow."""
     return await _run_preset("upscale", workflow, {"image": image, "scale": scale}, extra,
-                             wait=wait, timeout=timeout, preview=preview)
+                             wait=wait, timeout=timeout, preview=preview, ctx=ctx)
 
 
 @mcp.tool(structured_output=False)
@@ -792,6 +829,7 @@ async def comfyui_generate_video(
     workflow: str | None = None,
     wait: bool = False,
     timeout: int | None = None,
+    ctx: Context | None = None,
 ) -> list[Any]:
     """Generate a video with the default video workflow (preset "video"). `image`/`image2` are
     start or reference images (URL, base64 or ComfyUI input filename) if the workflow uses them.
@@ -805,7 +843,7 @@ async def comfyui_generate_video(
         {"prompt": prompt, "negative_prompt": negative_prompt, "image": image, "image2": image2,
          "width": width, "height": height, "aspect_ratio": aspect_ratio, "duration": duration,
          "length": length, "fps": fps, "seed": seed, "steps": steps},
-        extra, wait=wait, timeout=timeout,
+        extra, wait=wait, timeout=timeout, ctx=ctx,
     )
 
 
@@ -822,6 +860,7 @@ async def comfyui_generate_audio(
     workflow: str | None = None,
     wait: bool = False,
     timeout: int | None = None,
+    ctx: Context | None = None,
 ) -> list[Any]:
     """Generate audio/music with the default audio workflow (preset "audio").
     `prompt` describes the sound/style, `lyrics` is for song models, `duration` in seconds.
@@ -832,6 +871,6 @@ async def comfyui_generate_audio(
         "audio", workflow,
         {"prompt": prompt, "negative_prompt": negative_prompt, "lyrics": lyrics,
          "duration": duration, "seed": seed, "steps": steps},
-        extra, wait=wait, timeout=timeout,
+        extra, wait=wait, timeout=timeout, ctx=ctx,
     )
 

@@ -21,7 +21,7 @@ import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
@@ -203,6 +203,10 @@ class WorkflowRegistry:
         if self.dir.is_dir():
             for path in sorted(self.dir.rglob("*.json")):
                 rel = path.relative_to(self.dir).as_posix()
+                # Hidden folders are not workflows: a Kubernetes ConfigMap mount keeps its files
+                # in "..<timestamp>/" and links them from the top, so they would show up twice.
+                if any(part.startswith(".") for part in PurePosixPath(rel).parts):
+                    continue
                 if rel not in referenced:
                     name = rel.removesuffix(".json")
                     entries.setdefault(name, WorkflowEntry(name=name, file=rel))
