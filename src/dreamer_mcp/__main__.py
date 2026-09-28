@@ -1,10 +1,16 @@
-"""Entry point: `dreamer-mcp` / `python -m dreamer_mcp`."""
+"""Entry point: `dreamer-mcp` / `python -m dreamer_mcp`.
+
+`dreamer-mcp requirements [--offline]` prints the custom nodes/models the presets need (checked
+against COMFYUI_URL unless --offline) and exits with 1 when something is missing.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 import sys
+import threading
 
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -51,13 +57,47 @@ def build_http_app() -> ASGIApp:
     return app
 
 
+async def _check_requirements(offline: bool = False) -> tuple[str, int]:
+    from . import requirements
+    from .client import ComfyClient
+
+    client = None if offline else ComfyClient(get_settings())
+    try:
+        report = await requirements.check(client)
+    finally:
+        if client is not None:
+            await client.aclose()
+    return requirements.format_report(report), requirements.missing_count(report)
+
+
+def _log_requirements() -> None:
+    log = logging.getLogger("dreamer_mcp.requirements")
+    try:
+        text, missing = asyncio.run(_check_requirements())
+    except Exception as e:  # noqa: BLE001 - never break startup over the check
+        log.warning("Requirements check failed: %s", e)
+        return
+    log.log(logging.WARNING if missing else logging.INFO, "%s", text)
+
+
+def requirements_command(args: list[str]) -> int:
+    text, missing = asyncio.run(_check_requirements(offline="--offline" in args))
+    print(text)
+    return 1 if missing else 0
+
+
 def main() -> None:
+    if sys.argv[1:2] == ["requirements"]:
+        sys.exit(requirements_command(sys.argv[2:]))
     s = get_settings()
     logging.basicConfig(level=s.log_level, stream=sys.stderr,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
     log = logging.getLogger("dreamer_mcp")
-    log.info("ComfyUI at %s, workflows in %s", s.comfyui_url, s.workflows_dir.resolve())
+    log.info("ComfyUI at %s, workflows in %s", s.comfyui_url, s.workflows_path.resolve())
+    if s.check_requirements:
+        # In the background: the MCP server starts right away even if ComfyUI is slow or down.
+        threading.Thread(target=_log_requirements, name="requirements", daemon=True).start()
 
     if s.mcp_transport == "stdio":
         from .server import mcp

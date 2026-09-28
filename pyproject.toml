@@ -1,6 +1,6 @@
 [project]
 name = "dreamer-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP server for a remote ComfyUI instance (HTTP API), designed to run in Docker/Kubernetes"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,6 +26,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dreamer_mcp"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"workflows" = "dreamer_mcp/default_workflows"
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6"]

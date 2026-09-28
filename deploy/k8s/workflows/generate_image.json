@@ -1,0 +1,460 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "qwen_image_2.1_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "3": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_8b_int8_convrot.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "4": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+    },
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "15": {
+    "class_type": "TextEncodeQwenImage21",
+    "inputs": {
+      "prompt": [
+        "59",
+        0
+      ],
+      "negative_prompt": "",
+      "resolution": 1024,
+      "clip": [
+        "3",
+        0
+      ],
+      "images.image_1": [
+        "17",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ],
+      "images.image_2": [
+        "47",
+        0
+      ],
+      "images.image_3": [
+        "48",
+        0
+      ],
+      "images.image_4": [
+        "49",
+        0
+      ],
+      "images.image_5": [
+        "51",
+        0
+      ],
+      "images.image_6": [
+        "52",
+        0
+      ],
+      "images.image_7": [
+        "53",
+        0
+      ],
+      "images.image_8": [
+        "54",
+        0
+      ],
+      "images.image_9": [
+        "55",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Text Encode Qwen Image 2.1"
+    }
+  },
+  "17": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    },
+    "_meta": {
+      "title": "[$IMAGEM_0]"
+    }
+  },
+  "47": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    },
+    "_meta": {
+      "title": "[$IMAGEM_1]"
+    }
+  },
+  "48": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    },
+    "_meta": {
+      "title": "[$IMAGEM_2]"
+    }
+  },
+  "49": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    },
+    "_meta": {
+      "title": "[$IMAGEM_3]"
+    }
+  },
+  "51": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    },
+    "_meta": {
+      "title": "[$IMAGEM_4]"
+    }
+  },
+  "52": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    },
+    "_meta": {
+      "title": "[$IMAGEM_5]"
+    }
+  },
+  "53": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    },
+    "_meta": {
+      "title": "[$IMAGEM_6]"
+    }
+  },
+  "54": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    },
+    "_meta": {
+      "title": "[$IMAGEM_7]"
+    }
+  },
+  "55": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    },
+    "_meta": {
+      "title": "[$IMAGEM_8]"
+    }
+  },
+  "59": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": "Keep the character and pose in <image1> unchanged, put this outfit from <image2> on the character, preserve the original facial features, hair, body shape and pose, outfit fits naturally on body, realistic denim fabric texture, natural clothing folds, keep the original background and original lighting, high fashion editorial photography, sharp details"
+    },
+    "_meta": {
+      "title": "[$PROMPT]"
+    }
+  },
+  "62": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 1096613679901612,
+      "steps": 30,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "143",
+        0
+      ],
+      "positive": [
+        "15",
+        0
+      ],
+      "negative": [
+        "15",
+        1
+      ],
+      "latent_image": [
+        "75",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "67": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": [
+        "161",
+        0
+      ],
+      "height": [
+        "162",
+        0
+      ],
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "68": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "62",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "75": {
+    "class_type": "easy ifElse",
+    "inputs": {
+      "boolean": [
+        "77",
+        0
+      ],
+      "on_true": [
+        "15",
+        2
+      ],
+      "on_false": [
+        "67",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "If else"
+    }
+  },
+  "77": {
+    "class_type": "PrimitiveBoolean",
+    "inputs": {
+      "value": true
+    },
+    "_meta": {
+      "title": "[$MANTER_RESOLUCAO]"
+    }
+  },
+  "115": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 788416263310827,
+      "steps": 30,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "143",
+        0
+      ],
+      "positive": [
+        "123",
+        0
+      ],
+      "negative": [
+        "123",
+        1
+      ],
+      "latent_image": [
+        "155",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "117": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "115",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "118": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "dreamer-mcp/UP_IMAGE",
+      "images": [
+        "117",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "123": {
+    "class_type": "TextEncodeQwenImage21",
+    "inputs": {
+      "prompt": "<image1> Preserve all elements in the image. And up sampling to higher resolutions.",
+      "negative_prompt": "",
+      "resolution": 1024,
+      "clip": [
+        "3",
+        0
+      ],
+      "images.image_1": [
+        "157",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Text Encode Qwen Image 2.1"
+    }
+  },
+  "143": {
+    "class_type": "ModelAttentionBackend",
+    "inputs": {
+      "attention": "comfy kitchen attention",
+      "model": [
+        "1",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Model Attention Backend"
+    }
+  },
+  "155": {
+    "class_type": "LatentUpscaleBy",
+    "inputs": {
+      "upscale_method": "bilinear",
+      "scale_by": 1.5,
+      "samples": [
+        "123",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "Upscale Latent By"
+    }
+  },
+  "156": {
+    "class_type": "easy cleanGpuUsed",
+    "inputs": {
+      "anything": [
+        "68",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Clean VRAM Used"
+    }
+  },
+  "157": {
+    "class_type": "easy clearCacheAll",
+    "inputs": {
+      "anything": [
+        "156",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Clear Cache All"
+    }
+  },
+  "158": {
+    "class_type": "easy cleanGpuUsed",
+    "inputs": {
+      "anything": [
+        "117",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Clean VRAM Used"
+    }
+  },
+  "159": {
+    "class_type": "easy clearCacheAll",
+    "inputs": {
+      "anything": [
+        "158",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Clear Cache All"
+    }
+  },
+  "160": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "dreamer-mcp/GEN_IMAGE",
+      "images": [
+        "68",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "161": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 1024
+    },
+    "_meta": {
+      "title": "[$WIDTH]"
+    }
+  },
+  "162": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 1024
+    },
+    "_meta": {
+      "title": "[$HEIGHT]"
+    }
+  }
+}

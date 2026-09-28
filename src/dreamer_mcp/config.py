@@ -9,6 +9,9 @@ from typing import Literal
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+PACKAGED_WORKFLOWS = Path(__file__).parent / "default_workflows"
+"""The repo's workflows/ folder, copied into the wheel (so `uvx dreamer-mcp` has the presets)."""
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -60,12 +63,23 @@ class Settings(BaseSettings):
     media_link_ttl: int = 86400
     """Lifetime of media links in seconds."""
 
+    check_requirements: bool = True
+    """Check at startup that ComfyUI has the custom nodes/models/workflows the presets need
+    (see `dreamer-mcp requirements`) and log the result."""
+
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     @field_validator("comfyui_url", "comfyui_public_url", "mcp_public_url")
     @classmethod
     def _strip_slash(cls, v: str | None) -> str | None:
         return v.rstrip("/") if v else v
+
+    @property
+    def workflows_path(self) -> Path:
+        """WORKFLOWS_DIR, or the workflows shipped in the package when that folder is missing."""
+        if self.workflows_dir.is_dir() or not PACKAGED_WORKFLOWS.is_dir():
+            return self.workflows_dir
+        return PACKAGED_WORKFLOWS
 
     @property
     def public_url(self) -> str:

@@ -36,6 +36,7 @@ Kubernetes) apontando para o ComfyUI onde quer que ele esteja. O modo stdio tamb
 | Tool | O que faz |
 |---|---|
 | `comfyui_status` | Online?, fila, GPU, VRAM/RAM, versões |
+| `comfyui_requirements` | Nós e modelos que os presets usam, com o que está faltando e onde baixar |
 | `comfyui_models` | Lista modelos (por pasta, com filtro) |
 | `comfyui_workflows` | Lista workflows (locais + salvos no ComfyUI), params e presets |
 | `comfyui_workflow_info` | Params amigáveis + inputs editáveis de cada nó |
@@ -83,6 +84,71 @@ claude mcp add dreamer -e COMFYUI_URL=http://192.168.0.10:8188 -- uvx --from git
 > Nomes `.local` (mDNS) normalmente não resolvem dentro de containers. Use o IP do ComfyUI,
 > `--add-host` no Docker ou `hostAliases` no Kubernetes.
 
+## Requisitos no ComfyUI
+
+Os presets usam modelos e alguns nós que precisam estar instalados no ComfyUI. Ao iniciar, o
+Dreamer MCP consulta o servidor e mostra no log o que já está lá e o que falta, com o link de
+download e a pasta de destino de cada modelo. A verificação roda em segundo plano, sem atrasar o
+MCP, e pode ser desligada com `CHECK_REQUIREMENTS=false`. Para ver o relatório sem subir o
+servidor:
+
+```bash
+docker run --rm -e COMFYUI_URL=http://192.168.0.10:8188 djavanryuuzaki/dreamer-mcp requirements
+```
+
+```bash
+uvx --from git+https://github.com/djavan-ryuuzaki/dreamer-mcp dreamer-mcp requirements
+```
+
+O comando termina com código 1 se faltar algo; `--offline` só lista os requisitos, sem consultar o
+ComfyUI. Com o MCP conectado, o assistente pode usar a tool `comfyui_requirements`.
+
+Versão testada: **ComfyUI 0.37.0**. Os nós marcados como *core* vêm com o próprio ComfyUI; se
+estiverem faltando, atualize-o.
+
+### Nós
+
+| Pacote | Usado em | Nós |
+|---|---|---|
+| ComfyUI (core) | imagem/asset | `TextEncodeQwenImage21`, `ModelAttentionBackend` |
+| ComfyUI (core) | vídeo | `MiniMaxH3ReferenceToVideo`, `ComfyMathExpression`, `ComfySwitchNode`, `ResolutionSelector` |
+| ComfyUI (core) | áudio | `YuE2GenerateABC`, `YuE2GenerateMusic`, `EmptyYuE2LatentAudio`, `SaveAudioAdvanced` |
+| [ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use) | imagem/asset | `easy ifElse`, `easy cleanGpuUsed`, `easy clearCacheAll` |
+| [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) *(opcional)* | imagem/asset | `SetNode`/`GetNode`: só para abrir e editar as versões de interface dos workflows |
+
+### Modelos
+
+Cada arquivo vai para `ComfyUI/models/<pasta>/`; subpastas também valem.
+
+**Imagens e assets** (`comfyui_generate_image`, `comfyui_generate_asset`), Qwen Image 2.1, ~17 GB:
+
+| Arquivo | Pasta | Tamanho |
+|---|---|---|
+| [`qwen_image_2.1_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors) | `diffusion_models` | 7,3 GB |
+| [`qwen3vl_8b_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors) | `text_encoders` | 9,4 GB |
+| [`qwen_image_2.1_vae_bf16.safetensors`](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors) | `vae` | 0,7 GB |
+
+**Vídeo com som** (`comfyui_generate_video`), MiniMax H3 reference-to-video, ~52 GB:
+
+| Arquivo | Pasta | Tamanho |
+|---|---|---|
+| [`minimax_h3_ref2va_pruned_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors) | `diffusion_models` | 21,0 GB |
+| [`qwen3vl_32b_minimax_h3_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors) | `text_encoders` | 27,1 GB |
+| [`minimax_h3_video_vae_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_int8_convrot.safetensors) | `vae` | 2,8 GB |
+| [`minimax_h3_audio_vae_fp32.safetensors`](https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors) | `vae` | 0,6 GB |
+| [`minimax_h3_taomate_3step_lora_avg_rank_19_bf16.safetensors`](https://huggingface.co/Kijai/MiniMax-H3_comfy/resolve/main/loras/minimax_h3_taomate_3step_lora_avg_rank_19_bf16.safetensors) | `loras` | 0,2 GB |
+
+A LoRA TaoMate acelera o vídeo para 3 passos.
+
+**Música com vocais** (`comfyui_generate_audio`), YuE2, ~4 GB:
+
+| Arquivo | Pasta | Tamanho |
+|---|---|---|
+| [`yue2_3b_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/YuE2/resolve/main/checkpoints/yue2_3b_int8_convrot.safetensors) | `checkpoints` | 4,0 GB |
+
+Só é preciso instalar o que for usar: cada grupo funciona sozinho. Os workflows já vêm com o MCP
+(veja abaixo), então basta ter os nós e os modelos.
+
 ## Workflows e presets
 
 O MCP executa workflows no **formato API** do ComfyUI. Há três maneiras de obtê-los:
@@ -98,8 +164,25 @@ O MCP executa workflows no **formato API** do ComfyUI. Há três maneiras de obt
 
 Workflows salvos no ComfyUI aparecem como `comfyui:<caminho>` e não exigem redeploy.
 
-> O `workflows/workflows.yaml` deste repositório mapeia os workflows do autor (Qwen Image 2.1,
-> MiniMax H3, YuE2), que não estão incluídos. Use-o como modelo para mapear os seus.
+### Workflows incluídos
+
+Os presets já vêm prontos, em [`workflows/`](workflows) (também embutidos no pacote e na imagem):
+
+| Arquivo | Preset | Modelo |
+|---|---|---|
+| `generate_image.json` | `image` | Qwen Image 2.1: gera ou edita (1 a 9 referências) + upscale |
+| `generate_asset.json` | `asset` | Qwen Image 2.1: PNG com fundo transparente + upscale |
+| `minimax_h3_r2v.json` | `video` | MiniMax H3: vídeo com som a partir de 2 imagens de referência |
+| `yue2_text2music.json` | `audio` | YuE2: música com vocais a partir de estilo + letra |
+| `qwen_image_t2i.json` | – | Qwen Image 2.1: template original de texto para imagem |
+
+No manifesto, cada preset aponta primeiro para `comfyui:api/<nome>.json` e usa a cópia incluída
+(`fallback`) quando esse arquivo não existe no ComfyUI. Para personalizar um fluxo, salve sua versão
+em `workflows/api/` no ComfyUI: ela passa a ter prioridade, sem redeploy.
+
+Se os seus modelos estiverem em subpastas (por exemplo `models/diffusion_models/QWEN/...`), não é
+preciso editar o workflow: um nome que não existe no ComfyUI é trocado automaticamente pelo arquivo
+de mesmo nome em uma subpasta, desde que haja só um.
 
 ### O manifesto `workflows.yaml`
 
@@ -117,6 +200,7 @@ presets:
 workflows:
   meu_flux:
     file: "comfyui:api/meu_flux.json"     # ou um arquivo local em WORKFLOWS_DIR
+    fallback: meu_flux.json               # opcional: cópia local se não existir no ComfyUI
     description: Flux dev
     params:
       prompt: {target: "[$PROMPT].value", type: string}
@@ -225,7 +309,7 @@ Sem `MCP_PUBLIC_URL` (ou em stdio), os links apontam para o `/view` do ComfyUI.
 | `COMFYUI_URL` | `http://127.0.0.1:8188` | URL usada pelo servidor para acessar o ComfyUI |
 | `COMFYUI_PUBLIC_URL` | = `COMFYUI_URL` | Base das URLs diretas devolvidas |
 | `COMFYUI_API_KEY` | – | Bearer enviado ao ComfyUI (se estiver atrás de um proxy com auth) |
-| `WORKFLOWS_DIR` | `workflows` (`/app/workflows` na imagem) | Pasta dos workflows + `workflows.yaml` |
+| `WORKFLOWS_DIR` | `workflows` (`/app/workflows` na imagem) | Pasta dos workflows + `workflows.yaml`; se não existir, usa os incluídos no pacote |
 | `WORKFLOWS_FROM_COMFYUI` | `true` | Listar também os workflows salvos no ComfyUI |
 | `DEFAULT_WAIT_TIMEOUT` | `300` | Segundos de espera quando `wait=true` |
 | `PREVIEW_MAX_SIZE` | `768` | Lado máximo das previews inline |
@@ -235,6 +319,7 @@ Sem `MCP_PUBLIC_URL` (ou em stdio), os links apontam para o `/view` do ComfyUI.
 | `MCP_PUBLIC_URL` | – | URL externa deste MCP; ativa os links de mídia |
 | `MEDIA_SECRET` | derivado do `MCP_AUTH_TOKEN` | Chave HMAC dos links (igual em todas as réplicas) |
 | `MEDIA_LINK_TTL` | `86400` | Validade dos links de mídia, em segundos |
+| `CHECK_REQUIREMENTS` | `true` | Verificar e mostrar no log, ao iniciar, os nós/modelos que faltam |
 | `LOG_LEVEL` | `INFO` | Nível de log |
 
 Veja [`.env.example`](.env.example).

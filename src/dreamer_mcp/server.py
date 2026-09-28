@@ -17,7 +17,7 @@ from PIL import Image as PILImage
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 
-from . import __version__, imaging
+from . import __version__, imaging, requirements
 from .client import ComfyClient, ComfyUIError
 from .config import get_settings
 from .convert import convert_ui_to_api
@@ -43,6 +43,7 @@ Typical flow: comfyui_workflows -> comfyui_workflow_info (see params/inputs) -> 
 For everyday tasks prefer the presets: comfyui_generate_image, comfyui_generate_asset, comfyui_upscale,
 comfyui_generate_video, comfyui_generate_audio.
 Generations can take minutes: for video/audio prefer wait=false and poll comfyui_job_status.
+If a preset fails because a node or model is missing, comfyui_requirements lists what to install.
 """
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
@@ -69,7 +70,7 @@ def registry() -> WorkflowRegistry:
     global _registry
     if _registry is None:
         s = get_settings()
-        _registry = WorkflowRegistry(client(), s.workflows_dir, s.workflows_from_comfyui)
+        _registry = WorkflowRegistry(client(), s.workflows_path, s.workflows_from_comfyui)
     return _registry
 
 
@@ -353,6 +354,19 @@ async def comfyui_status() -> dict[str, Any]:
         if key in system:
             result[key] = system[key].split(" ")[0]
     return result
+
+
+@mcp.tool(annotations=READ_ONLY)
+@tool_errors
+async def comfyui_requirements(
+    group: Literal["image", "video", "audio"] | None = None,
+) -> dict[str, Any]:
+    """Custom nodes, models (with download links and target folders) and workflows the presets
+    need, each checked against the ComfyUI server: status ok / missing. group: image (also
+    assets), video or audio; all when omitted."""
+    report = await requirements.check(client(), [group] if group else None)
+    report["missing"] = requirements.missing_count(report)
+    return report
 
 
 @mcp.tool(annotations=READ_ONLY)

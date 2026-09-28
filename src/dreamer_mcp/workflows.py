@@ -34,6 +34,7 @@ COMFYUI_PREFIX = "comfyui:"
 MANIFEST_NAMES = ("workflows.yaml", "workflows.yml")
 PRESET_KINDS = ("image", "asset", "upscale", "video", "audio")
 SEED_INPUTS = {"seed", "noise_seed"}
+MODEL_EXTS = (".safetensors", ".gguf", ".ckpt", ".pt", ".pth", ".bin", ".sft", ".onnx")
 MAX_SEED = 2**50
 
 
@@ -102,6 +103,8 @@ class WorkflowEntry:
     name: str
     file: str
     """Local file name relative to WORKFLOWS_DIR, or "comfyui:<path in user workflows>"."""
+    fallback: str | None = None
+    """Local file used when `file` ("comfyui:...") is not saved in ComfyUI."""
     description: str = ""
     params: dict[str, ParamSpec] = field(default_factory=dict)
     when_missing: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -149,6 +152,7 @@ def load_manifest(workflows_dir: Path) -> Manifest:
         workflows[name] = WorkflowEntry(
             name=name,
             file=spec.get("file", f"{name}.json"),
+            fallback=spec.get("fallback"),
             description=spec.get("description", ""),
             params=params,
             when_missing=dict(spec.get("when_missing") or {}),
@@ -194,7 +198,8 @@ class WorkflowRegistry:
     async def entries(self) -> dict[str, WorkflowEntry]:
         manifest = self.manifest()
         entries = dict(manifest.workflows)
-        referenced = {e.file for e in entries.values()}
+        referenced = {e.file for e in entries.values()} | {
+            e.fallback for e in entries.values() if e.fallback}
         if self.dir.is_dir():
             for path in sorted(self.dir.rglob("*.json")):
                 rel = path.relative_to(self.dir).as_posix()
@@ -219,14 +224,21 @@ class WorkflowRegistry:
         raise WorkflowError(f"Unknown workflow '{name}'. Available: {', '.join(sorted(entries)) or 'none'}")
 
     async def load_raw(self, entry: WorkflowEntry) -> Any:
-        if entry.source == "comfyui":
-            try:
-                return await self.client.get_user_workflow(entry.file.removeprefix(COMFYUI_PREFIX))
-            except ComfyUIError as e:
-                raise WorkflowError(f"Cannot load '{entry.file}' from ComfyUI: {e}") from e
-        path = (self.dir / entry.file).resolve()
+        if entry.source != "comfyui":
+            return self._load_local(entry.file)
+        relpath = entry.file.removeprefix(COMFYUI_PREFIX)
+        try:
+            return await self.client.get_user_workflow(relpath)
+        except ComfyUIError as e:
+            # Not saved in ComfyUI: use the copy shipped with the MCP, if the manifest has one.
+            if entry.fallback and (self.dir / entry.fallback).is_file():
+                return self._load_local(entry.fallback)
+            raise WorkflowError(f"Cannot load '{entry.file}' from ComfyUI: {e}") from e
+
+    def _load_local(self, file: str) -> Any:
+        path = (self.dir / file).resolve()
         if not path.is_relative_to(self.dir.resolve()) or not path.is_file():
-            raise WorkflowError(f"Workflow file not found: {entry.file}")
+            raise WorkflowError(f"Workflow file not found: {file}")
         return json.loads(path.read_text(encoding="utf-8"))
 
     async def load_graph(self, entry: WorkflowEntry) -> dict:
@@ -380,6 +392,34 @@ def _split_target(graph: dict, target: str) -> tuple[str, str]:
             except WorkflowError:
                 continue
     raise WorkflowError(f"No node found for target '{target}'")
+
+
+def file_basename(path: str) -> str:
+    return path.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+async def resolve_model_paths(client: ComfyClient, graph: dict) -> dict[str, str]:
+    """Point model inputs at the file ComfyUI actually has when the workflow names one that
+    is not in the combo but exactly one installed file has the same name in a subfolder
+    (e.g. "model.safetensors" -> "QWEN2/model.safetensors"). Returns {old: new}."""
+    wanted = [(nid, key, value) for nid, node in graph.items()
+              for key, value in (node.get("inputs") or {}).items()
+              if isinstance(value, str) and value.lower().endswith(MODEL_EXTS)]
+    classes = sorted({graph[nid]["class_type"] for nid, _, _ in wanted})
+    infos = await asyncio.gather(*(client.object_info(c) for c in classes),
+                                 return_exceptions=True)
+    specs = {c: i.get(c) or {} for c, i in zip(classes, infos, strict=True) if isinstance(i, dict)}
+    changed: dict[str, str] = {}
+    for nid, key, value in wanted:
+        inputs = (specs.get(graph[nid]["class_type"]) or {}).get("input") or {}
+        options = combo_options((inputs.get("required") or {}).get(key)
+                                or (inputs.get("optional") or {}).get(key))
+        if not options or value in options:
+            continue
+        matches = [o for o in options if file_basename(o) == file_basename(value)]
+        if len(matches) == 1:
+            graph[nid]["inputs"][key] = changed[value] = matches[0]
+    return changed
 
 
 async def param_choices(client: ComfyClient, graph: dict, spec: ParamSpec) -> list[str] | None:
@@ -588,6 +628,7 @@ async def build_graph(
         raise WorkflowError("Every output of this workflow was disabled; enable at least one.")
     if randomize:
         randomize_seeds(graph, skip=touched)
+    await resolve_model_paths(registry.client, graph)
     return graph, applied, ignored
 
 
