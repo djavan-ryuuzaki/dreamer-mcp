@@ -102,6 +102,17 @@ async def test_score_errors_do_not_fail_the_job(fake, monkeypatch):
     assert out[0]["status"] == "queued"
 
 
+async def test_no_writable_temp_dir_is_a_score_error(monkeypatch):
+    monkeypatch.setattr(score, "tools", lambda: ("abcm2ps", "gs"))
+
+    def no_tmp(**_):
+        raise FileNotFoundError("No usable temporary directory found")
+
+    monkeypatch.setattr(score.tempfile, "TemporaryDirectory", no_tmp)
+    with pytest.raises(score.ScoreError, match="emptyDir at /tmp"):
+        await score.render_pdf("X:1\nK:C\nC|")
+
+
 def test_prepare_and_names():
     assert score.prepare("T:x\nK:C\nabc|").startswith("%abc-2.1\n%%encoding utf-8\nX:1\nT:x")
     with pytest.raises(score.ScoreError):

@@ -358,7 +358,7 @@ async def _prepare_score(entry: WorkflowEntry, graph: dict, params: dict[str, An
         return None
     try:
         filename = await _save_score(given, uuid.uuid4().hex[:8])
-    except (score.ScoreError, ComfyUIError) as e:
+    except (score.ScoreError, ComfyUIError, OSError) as e:  # never block the music itself
         return f"sheet music not created: {e}"
     meta["mcp_score"] = {"file": filename}
     return _score_output(node, filename)
@@ -381,7 +381,7 @@ async def _workflow_score(prompt_id: str, entry: dict) -> dict[str, Any] | str |
         return "sheet music not created: the workflow returned no ABC text"
     try:
         filename = await _save_score(abc_text, prompt_id[:8])
-    except (score.ScoreError, ComfyUIError) as e:
+    except (score.ScoreError, ComfyUIError, OSError) as e:
         return f"sheet music not created: {e}"
     _scores[prompt_id] = _score_output(node, filename)
     return _scores[prompt_id]

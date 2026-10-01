@@ -27,6 +27,7 @@ spec:
             - {name: WORKFLOWS_DIR, value: /workflows}
           volumeMounts:
             - {name: workflows, mountPath: /workflows, readOnly: true}
+            - {name: tmp, mountPath: /tmp}   # sheet music (abcm2ps/ghostscript) needs a writable temp dir
           readinessProbe:
             httpGet: {path: /healthz, port: http}
             periodSeconds: 10
@@ -43,3 +44,5 @@ spec:
       volumes:
         - name: workflows
           configMap: {name: dreamer-mcp-workflows}
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
