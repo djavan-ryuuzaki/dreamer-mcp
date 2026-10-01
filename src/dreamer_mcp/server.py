@@ -966,10 +966,32 @@ gives the most control:
   chord symbols.
 An instrumental line under the vocals (fills, comping, counter-melody) makes the arrangement
 much richer than "Z4" rests, which tend to sound like a karaoke backing: in plain ABC write it as
-a second voice (e.g. V:Voz + V:Cavaco / V:Piano), it becomes the Ins voice."""
+a second voice (e.g. V:Voz + V:Cavaco / V:Piano), it becomes the Ins voice.
+Plain ABC may keep T: (title), C: (authors), %%text section names and w: lyrics under the notes:
+they are dropped for YuE2 but printed on the sheet music (PDF), which is what a song
+registration needs.
+Writing a score YuE2 sings faithfully (when it doesn't fit, the model improvises and the song
+runs longer than the score):
+  - give the lyrics enough notes: about one note per sung syllable, more for melismas; Portuguese
+    and Spanish need more notes than the written syllables suggest, so avoid squeezing vowels
+    (do~a) into one note;
+  - use the genre's rhythm, not only straight eighths: dance-pop/funk/reggaeton 3+3+2
+    (e.g. g3f3e2 at L:1/16) and anticipations tied over the beat or bar (e2-|e2...); samba/pagode
+    syncopation; ballads with longer notes;
+  - make the chorus the peak: its highest note above the verse and the pre-chorus;
+  - give the pre-chorus its own harmony (e.g. the IV or ii chord, a dominant) to build tension;
+  - keep regular phrases (2 or 4 bars, sections of 4 or 8 bars) and vary the instrumental line
+    between sections (riff in the intro, comping in verses, fuller in choruses)."""
+
+
+def _with_abc_dialect(fn):
+    """Append ABC_DIALECT to the tool description (a docstring cannot be an expression)."""
+    fn.__doc__ = (fn.__doc__ or "").rstrip() + "\n\n" + ABC_DIALECT
+    return fn
 
 
 @mcp.tool(annotations=READ_ONLY)
+@_with_abc_dialect
 @tool_errors
 async def comfyui_normalize_abc(abc_notation: str, lyrics: str | None = None,
                                 mode: Literal["full", "melody"] = "full") -> dict[str, Any]:
@@ -978,7 +1000,7 @@ async def comfyui_normalize_abc(abc_notation: str, lyrics: str | None = None,
     sections that don't follow the [Verse]/[Chorus] tags of `lyrics`...).
     comfyui_generate_music does this by itself; use this tool to check a score first.
 
-    """ + ABC_DIALECT
+    """
     try:
         result, warnings = abc.for_yue2(abc_notation, lyrics, mode)
     except abc.AbcError as e:
@@ -988,6 +1010,7 @@ async def comfyui_normalize_abc(abc_notation: str, lyrics: str | None = None,
 
 
 @mcp.tool(structured_output=False)
+@_with_abc_dialect
 @tool_errors
 async def comfyui_generate_music(
     style: str,
@@ -1018,7 +1041,7 @@ async def comfyui_generate_music(
     songs) or "melody" (melody only, default for covers). `duration` caps the length in seconds.
     Takes a few minutes: by default returns a prompt_id to poll with comfyui_job_status.
 
-    """ + ABC_DIALECT
+    """
     return await _run_preset(
         "music_cover" if song else "music", workflow,
         {"prompt": style, "lyrics": lyrics, "abc": abc_notation, "song": song, "mode": mode,
