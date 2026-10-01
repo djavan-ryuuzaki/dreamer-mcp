@@ -41,7 +41,7 @@ class FakeComfy:
             self.submitted.append(graph)
             self.history[PROMPT_ID] = {
                 "status": {"status_str": "success", "completed": True, "messages": []},
-                "outputs": {"12": {"text": ["x" * 600]}, "9": {"images": [
+                "outputs": {"12": {"text": ["x" * 25000]}, "9": {"images": [
                     {"filename": "img_0001.png", "subfolder": "mcp", "type": "output"},
                     {"filename": "preview.png", "subfolder": "", "type": "temp"},
                 ]}},
@@ -140,7 +140,7 @@ async def test_generate_image_waits_and_returns_outputs(fake):
     assert fake.submitted[0]["5"]["inputs"]["width"] == 768
     assert [o["filename"] for o in info["outputs"]] == ["img_0001.png"]  # temp excluded
     assert info["outputs"][0]["url"].startswith("https://comfy.example/view?")
-    assert info["texts"][0]["node"] == "12" and info["texts"][0]["text"].endswith("[600 chars]")
+    assert info["texts"][0]["node"] == "12" and info["texts"][0]["text"].endswith("[25000 chars]")
 
 
 async def test_workflows_listing(fake):

@@ -22,6 +22,9 @@ configMapGenerator:
       - workflows/qwen_image_t2i.json
       - workflows/minimax_h3_r2v.json
       - workflows/yue2_text2music.json
+      - workflows/generate_music.json
+      - workflows/generate_cover_music.json
+      - workflows/generate_song_abc.json
       - workflows/txt2img.json
       - workflows/upscale.json
   - name: dreamer-mcp-config

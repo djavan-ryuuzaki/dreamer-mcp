@@ -4,13 +4,16 @@
 #   (in ComfyUI: Workflow > Export (API)). Files not listed here still show up in
 #   comfyui_workflows under their file name and can be run with raw `inputs`.
 # - Here you give each workflow friendly params and pick the presets used by
-#   comfyui_generate_image / comfyui_upscale / comfyui_generate_video / comfyui_generate_audio.
+#   comfyui_generate_image / comfyui_upscale / comfyui_generate_video / comfyui_generate_audio /
+#   comfyui_generate_music / comfyui_song_to_abc.
 #
 # Param target:  "<node id or title>.<input>"   e.g. "6.text" or "Positive Prompt.text"
 #                (a list of targets writes the same value to several nodes)
-# Param types:   auto | string | int | float | bool | seed | file
+# Param types:   auto | string | int | float | bool | seed | choice | file | file_list
 #   seed -> random when not provided (or "random" / -1)
 #   file -> accepts URL / data URI / base64 / file name; uploaded to ComfyUI automatically
+# transform: rewrites a string param after all params are set, e.g. yue2_abc turns any ABC
+#   notation into the dialect YuE2 understands (args are read from the final graph)
 # file: can also point to a workflow saved in ComfyUI:  file: "comfyui:my-folder/flux.json"
 #   fallback: a local file used when that ComfyUI workflow doesn't exist (the defaults below
 #   prefer the copy you save/edit in ComfyUI and fall back to the one shipped here)
@@ -20,7 +23,10 @@ presets:
   asset: generate_asset
   upscale: null # e.g. upscale (needs RealESRGAN_x4plus.pth in models/upscale_models)
   video: minimax_h3_r2v
-  audio: yue2_music
+  audio: generate_music
+  music: generate_music
+  music_cover: generate_cover_music
+  song_abc: generate_song_abc
 
 workflows:
   generate_image:
@@ -144,6 +150,72 @@ workflows:
       seed:         {target: "129.noise_seed", type: seed}
       lightning:    {target: "146.value", type: bool, description: "Fast 3-step Lightning LoRA (true) or full quality (false)"}
       steps:        {target: "143.value", type: int, description: Steps when lightning=false}
+
+  generate_music:
+    # From the UI workflow GENERATE_MUSIC.json. Without `abc`, YuE2 writes the score (ABC
+    # notation) itself; with `abc` that score is used instead. Returns the song and the score (.md).
+    file: "comfyui:api/generate_music.json"
+    fallback: generate_music.json
+    description: YuE2 song with vocals from style + lyrics, optionally following your own ABC score; returns the audio, the ABC used and its sheet music (PDF)
+    outputs:
+      audio: "13"
+      abc: "5"
+    score: {param: abc, output: abc}   # PDF of the caller's ABC, else of the one YuE2 wrote
+    params:
+      prompt:   {target: "[$STYLE].value", type: string, description: "Musical style: genre, voice, instruments, mood, BPM"}
+      lyrics:   {target: "[$LYRICS].value", type: string, description: "Lyrics with [Verse]/[Chorus]/[Bridge] tags, in the order of the score"}
+      abc:
+        target: "[$ABC_INPUT].value"
+        type: string
+        description: "Optional score in ABC notation; any ABC is rewritten to YuE2's dialect (see comfyui_normalize_abc)"
+        transform: {name: yue2_abc, lyrics: "[$LYRICS].value", mode: "8.mode"}
+      mode:     {target: ["2.mode", "8.mode"], type: choice, description: "full: melody + chords; melody: melody only"}
+      duration: {target: "[$MAX_SECONDS].value", type: float, description: "Maximum length in seconds (default 900; the song usually ends earlier)"}
+      seed:     {target: ["2.seed", "8.seed"], type: seed}
+    when_set:
+      abc: {"[$GERAR_ABC].value": false}
+    when_missing:
+      abc: {"[$GERAR_ABC].value": true}
+
+  generate_cover_music:
+    # From the UI workflow GENERATE_COVER_MUSIC.json. SheetSage2 transcribes the melody of a
+    # reference song and YuE2 sings it with new style/lyrics; or pass `abc` instead of `song`.
+    # Fix in the API copy: the Save Text node is fed the ABC (the UI version saves the style).
+    file: "comfyui:api/generate_cover_music.json"
+    fallback: generate_cover_music.json
+    description: YuE2 cover - new style/lyrics over the melody of a reference song (or of an ABC score); returns the audio, the ABC used and its sheet music (PDF)
+    outputs:
+      audio: "13"
+      abc: "5"
+    score: {param: abc, output: abc}
+    params:
+      prompt:   {target: "[$STYLE].value", type: string, description: "Musical style of the cover"}
+      lyrics:   {target: "[$LYRICS].value", type: string, description: "Lyrics with [Verse]/[Chorus] tags"}
+      song:     {target: "21.audio", type: file, description: "Reference song (URL, base64 or ComfyUI input filename)"}
+      abc:
+        target: "[$ABC_INPUT].value"
+        type: string
+        description: "Score to follow instead of transcribing `song`"
+        transform: {name: yue2_abc, lyrics: "[$LYRICS].value", mode: "8.mode"}
+      mode:     {target: ["19.mode", "8.mode"], type: choice, description: "melody (recommended for covers) or full"}
+      duration: {target: "[$MAX_SECONDS].value", type: float, description: "Maximum length in seconds"}
+      seed:     {target: "8.seed", type: seed}
+    when_set:
+      abc: {"[$GERAR_ABC].value": false}
+    when_missing:
+      abc: {"[$GERAR_ABC].value": true}
+
+  generate_song_abc:
+    # From the UI workflow GENERATE_SONG_ABC.json: SheetSage2 transcription of a song.
+    file: "comfyui:api/generate_song_abc.json"
+    fallback: generate_song_abc.json
+    description: Transcribe a song into ABC notation (YuE2 dialect) with SheetSage2, plus its sheet music (PDF)
+    outputs:
+      abc: "5"
+    score: {output: abc}
+    params:
+      song: {target: "[$SONG].audio", type: file, description: "Song to transcribe (URL, base64 or ComfyUI input filename)"}
+      mode: {target: "2.mode", type: choice, description: "full: melody + chords; melody: melody only"}
 
   yue2_music:
     # Saved from history. Plans the song in ABC notation first, then generates the audio (~1 min).

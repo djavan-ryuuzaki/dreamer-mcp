@@ -7,6 +7,7 @@ import functools
 import io
 import re
 import time
+import uuid
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
@@ -18,7 +19,7 @@ from PIL import Image as PILImage
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 
-from . import __version__, imaging, requirements
+from . import __version__, abc, imaging, requirements, score
 from .client import ComfyClient, ComfyUIError
 from .config import get_settings
 from .convert import convert_ui_to_api
@@ -42,7 +43,7 @@ Tools for a remote ComfyUI server.
 Typical flow: comfyui_workflows -> comfyui_workflow_info (see params/inputs) -> comfyui_run
 (wait=false returns a prompt_id) -> comfyui_job_status -> comfyui_get_output / comfyui_view_image.
 For everyday tasks prefer the presets: comfyui_generate_image, comfyui_generate_asset, comfyui_upscale,
-comfyui_generate_video, comfyui_generate_audio.
+comfyui_generate_video, comfyui_generate_music (songs, covers), comfyui_song_to_abc.
 Generations can take minutes: for video/audio prefer wait=false and poll comfyui_job_status.
 If a preset fails because a node or model is missing, comfyui_requirements lists what to install.
 """
@@ -52,6 +53,7 @@ DONE = {"success", "error", "interrupted"}
 POLL_DELAY_MAX = 3.0  # seconds between polls of a job, so progress goes out at least this often
 NON_MODEL_FOLDERS = {"custom_nodes"}
 SAVED_WORKFLOWS_SUBDIR = "api"
+SCORES_SUBFOLDER = "dreamer-mcp/scores"
 READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
 
 mcp = MCPServer(name="dreamer-mcp", instructions=INSTRUCTIONS, version=__version__)
@@ -59,6 +61,7 @@ mcp = MCPServer(name="dreamer-mcp", instructions=INSTRUCTIONS, version=__version
 _client: ComfyClient | None = None
 _registry: WorkflowRegistry | None = None
 _media: MediaLinks | None = None
+_scores: dict[str, dict] = {}  # prompt_id -> score output rendered from the workflow's ABC
 
 
 def client() -> ComfyClient:
@@ -160,11 +163,13 @@ def _resource_links(outputs: list[dict]) -> list[ResourceLink]:
             description=f"Player: {o['player']}" if "player" in o else None,
         )
         for o in outputs
-        if media_kind(o["filename"]) in ("video", "audio")
+        if media_kind(o["filename"]) in ("video", "audio") or o["mime_type"] == "application/pdf"
     ]
 
 
-async def _job_status(prompt_id: str, include_temp: bool = False) -> dict[str, Any]:
+async def _job_status(prompt_id: str, include_temp: bool = False,
+                      scores: bool = False) -> dict[str, Any]:
+    """`scores`: once the job succeeded, add its sheet music (rendered on first request)."""
     c = client()
     history = await c.history(prompt_id)
     if prompt_id in history:
@@ -183,6 +188,12 @@ async def _job_status(prompt_id: str, include_temp: bool = False) -> dict[str, A
         result["outputs"] = extract_outputs(entry, media().links, include_temp)
         if texts := extract_texts(entry):
             result["texts"] = texts
+        if scores and state == "success":
+            out = await _workflow_score(prompt_id, entry)
+            if isinstance(out, str):
+                result["score_error"] = out
+            elif out:
+                result["outputs"].append(out)
         return result
 
     q = await c.queue()
@@ -227,7 +238,7 @@ async def _wait(prompt_id: str, timeout: int, ctx: Context | None = None) -> dic
     delay = 0.5
     try:
         while True:
-            status = await _job_status(prompt_id)
+            status = await _job_status(prompt_id, scores=True)
             if status["status"] in DONE or time.monotonic() >= deadline:
                 if status["status"] not in DONE:
                     status["note"] = (
@@ -283,9 +294,14 @@ async def _execute(
     graph, applied, ignored = await build_graph(
         reg, entry, params=params, overrides=inputs, randomize=randomize_seed, graph=graph
     )
+    score_out = await _prepare_score(entry, graph, params or {})
     submitted = await client().submit(graph)
     prompt_id = submitted["prompt_id"]
     result: dict[str, Any] = {"workflow": entry.name, "prompt_id": prompt_id}
+    if isinstance(score_out, str):
+        result["score_error"] = score_out
+    elif score_out and not wait:
+        result["score"] = score_out
     if applied:
         result["applied"] = applied
     if ignored:
@@ -306,6 +322,69 @@ async def _execute(
         if preview:
             content.extend(await _previews(result.get("outputs", [])))
     return content
+
+
+def _score_output(node: str, filename: str) -> dict[str, Any]:
+    return {"node": node, "label": "score", "kind": "score", "filename": filename,
+            "subfolder": SCORES_SUBFOLDER, "type": "output", "mime_type": "application/pdf",
+            **media().links(filename, SCORES_SUBFOLDER, "output")}
+
+
+async def _save_score(abc_text: str, tag: str) -> str:
+    """Render the ABC to PDF and store it in ComfyUI's output dir. Returns the file name."""
+    pdf = await score.render_pdf(abc_text)
+    name = f"{score.slug(score.title(abc_text))}_{tag}.pdf"
+    saved = await client().upload(pdf, name, overwrite=True, type_="output",
+                                  subfolder=SCORES_SUBFOLDER)
+    return saved.get("name", name)
+
+
+async def _prepare_score(entry: WorkflowEntry, graph: dict, params: dict[str, Any]
+                         ) -> dict[str, Any] | str | None:
+    """Workflows with `score`: when the caller gave the ABC, render that text now (it keeps
+    lyrics and layout the caller wrote); otherwise mark the job so the ABC the workflow writes
+    is rendered when it finishes. The choice is stored in the submitted graph (_meta), so later
+    comfyui_job_status / comfyui_get_output calls know it too. Returns the score output, an
+    error message, or None."""
+    cfg = entry.score
+    node = next((nid for nid, n in graph.items()
+                 if (n.get("_meta") or {}).get("mcp_output") == cfg.get("output")), None)
+    if not cfg or node is None:
+        return None
+    meta = graph[node].setdefault("_meta", {})
+    given = params.get(cfg.get("param", ""))
+    if not (isinstance(given, str) and given.strip()):
+        meta["mcp_score"] = {"from": "workflow"}
+        return None
+    try:
+        filename = await _save_score(given, uuid.uuid4().hex[:8])
+    except (score.ScoreError, ComfyUIError) as e:
+        return f"sheet music not created: {e}"
+    meta["mcp_score"] = {"file": filename}
+    return _score_output(node, filename)
+
+
+async def _workflow_score(prompt_id: str, entry: dict) -> dict[str, Any] | str | None:
+    prompt = entry.get("prompt") or []
+    graph = prompt[2] if len(prompt) > 2 and isinstance(prompt[2], dict) else {}
+    node, how = next(((nid, n["_meta"]["mcp_score"]) for nid, n in graph.items()
+                      if isinstance((n.get("_meta") or {}).get("mcp_score"), dict)), (None, None))
+    if node is None:
+        return None
+    if "file" in how:
+        return _score_output(node, how["file"])
+    if prompt_id in _scores:
+        return _scores[prompt_id]
+    texts = ((entry.get("outputs") or {}).get(node) or {}).get("text") or []
+    abc_text = next((t for t in texts if isinstance(t, str) and t.strip()), None)
+    if abc_text is None:
+        return "sheet music not created: the workflow returned no ABC text"
+    try:
+        filename = await _save_score(abc_text, prompt_id[:8])
+    except (score.ScoreError, ComfyUIError) as e:
+        return f"sheet music not created: {e}"
+    _scores[prompt_id] = _score_output(node, filename)
+    return _scores[prompt_id]
 
 
 async def _trim_outputs(entry: WorkflowEntry, applied: dict[str, Any],
@@ -602,8 +681,8 @@ async def comfyui_convert_workflow(
 @tool_errors
 async def comfyui_job_status(prompt_id: str) -> dict[str, Any]:
     """Status of a job: pending (with queue_position), running, success, error, interrupted,
-    or not_found. Finished jobs include their output files."""
-    return await _job_status(prompt_id)
+    or not_found. Finished jobs include their output files (and sheet music for music jobs)."""
+    return await _job_status(prompt_id, scores=True)
 
 
 @mcp.tool(annotations=READ_ONLY, structured_output=False)
@@ -616,7 +695,7 @@ async def comfyui_get_output(prompt_id: str, include_temp: bool = False) -> list
         prompt_id: Job id returned by comfyui_run or a preset tool.
         include_temp: Also include temporary preview files (PreviewImage nodes).
     """
-    status = await _job_status(prompt_id, include_temp=include_temp)
+    status = await _job_status(prompt_id, include_temp=include_temp, scores=True)
     if status["status"] not in DONE:
         status["note"] = "Job has not finished yet."
     return [status, *_resource_links(status.get("outputs", []))]
@@ -873,4 +952,100 @@ async def comfyui_generate_audio(
          "duration": duration, "seed": seed, "steps": steps},
         extra, wait=wait, timeout=timeout, ctx=ctx,
     )
+
+
+ABC_DIALECT = """YuE2 does not parse ABC: the score is fed to the model as text, so it must look like the scores
+YuE2 itself writes. Any ABC is rewritten into that dialect automatically; writing it directly
+gives the most control:
+  header X:1 / T: / M:4/4 / L:1/16 / Q:1/4=<bpm> / V: Vocal ... / V: Ins ... / K:<key>
+  sections as comment lines "% intro", "% verse", "% pre-chorus", "% chorus", "% bridge",
+  "% interlude", "% outro"; inside them, up to 4 bars of "V: Vocal" (sung melody, chord symbol
+  in quotes at the start of a bar, rests z16) followed by the same bars of "V: Ins"
+  (instrumental line, or Z4 = 4 bars of rest); no w: lyric lines (lyrics are a separate input,
+  with [Verse]/[Chorus] tags in the same order as the sung sections); mode "melody" uses no
+  chord symbols.
+An instrumental line under the vocals (fills, comping, counter-melody) makes the arrangement
+much richer than "Z4" rests, which tend to sound like a karaoke backing: in plain ABC write it as
+a second voice (e.g. V:Voz + V:Cavaco / V:Piano), it becomes the Ins voice."""
+
+
+@mcp.tool(annotations=READ_ONLY)
+@tool_errors
+async def comfyui_normalize_abc(abc_notation: str, lyrics: str | None = None,
+                                mode: Literal["full", "melody"] = "full") -> dict[str, Any]:
+    """Rewrite ABC notation (e.g. written by an LLM: one voice, L:1/8, w: lyrics, %%text or P:
+    sections) into the dialect YuE2 understands, and report problems (bars of the wrong length,
+    sections that don't follow the [Verse]/[Chorus] tags of `lyrics`...).
+    comfyui_generate_music does this by itself; use this tool to check a score first.
+
+    """ + ABC_DIALECT
+    try:
+        result, warnings = abc.for_yue2(abc_notation, lyrics, mode)
+    except abc.AbcError as e:
+        raise ToolError(str(e)) from e
+    return {"abc": result, "warnings": warnings,
+            "sung_sections": abc.abc_vocal_sections(result)}
+
+
+@mcp.tool(structured_output=False)
+@tool_errors
+async def comfyui_generate_music(
+    style: str,
+    lyrics: str,
+    abc_notation: str | None = None,
+    song: str | None = None,
+    mode: Literal["full", "melody"] | None = None,
+    duration: float | None = None,
+    seed: int | None = None,
+    extra: dict[str, Any] | None = None,
+    workflow: str | None = None,
+    wait: bool = False,
+    timeout: int | None = None,
+    ctx: Context | None = None,
+) -> list[Any]:
+    """Generate a song with vocals (YuE2). Returns the audio (label "audio"), the ABC score
+    that was used (label "abc", an .md file; its text is also in `texts`) and its sheet music
+    (label "score", a PDF): of `abc_notation` exactly as given (with its w: lyrics) when you pass
+    one, else of the score the workflow wrote (created when the job finishes; with wait=false it
+    shows up in comfyui_job_status / comfyui_get_output).
+
+    - Only style + lyrics (preset "music"): YuE2 writes the score itself, then sings it.
+    - With `abc_notation`: YuE2 follows your score (melody, chords, structure, tempo).
+    - With `song` (URL, base64 or ComfyUI input filename; preset "music_cover"): a cover -
+      SheetSage2 transcribes the melody of that song and YuE2 sings it with the new style and
+      lyrics (`abc_notation`, if given, replaces the transcription).
+    `lyrics` use [Verse]/[Chorus]/[Bridge] tags. `mode`: "full" (melody + chords, default for
+    songs) or "melody" (melody only, default for covers). `duration` caps the length in seconds.
+    Takes a few minutes: by default returns a prompt_id to poll with comfyui_job_status.
+
+    """ + ABC_DIALECT
+    return await _run_preset(
+        "music_cover" if song else "music", workflow,
+        {"prompt": style, "lyrics": lyrics, "abc": abc_notation, "song": song, "mode": mode,
+         "duration": duration, "seed": seed},
+        extra, wait=wait, timeout=timeout, ctx=ctx,
+    )
+
+
+@mcp.tool(structured_output=False)
+@tool_errors
+async def comfyui_song_to_abc(
+    song: str,
+    mode: Literal["full", "melody"] | None = None,
+    workflow: str | None = None,
+    timeout: int | None = None,
+    ctx: Context | None = None,
+) -> list[Any]:
+    """Transcribe a song (URL, base64 or ComfyUI input filename) into ABC notation with SheetSage2
+    (preset "song_abc"), in the dialect YuE2 uses: edit it and pass it to comfyui_generate_music
+    as `abc_notation`. mode "full" = melody + chords, "melody" = melody only (for covers).
+    Also returns the sheet music of the transcription (label "score", a PDF)."""
+    content = await _run_preset("song_abc", workflow, {"song": song, "mode": mode}, None,
+                                wait=True, timeout=timeout, ctx=ctx)
+    result = content[0]
+    scores = [t["text"] for t in result.get("texts", []) if t["text"].lstrip().startswith("X:")]
+    if scores:
+        result["abc"] = scores[0] if len(scores) == 1 else scores
+        result.pop("texts", None)
+    return content
 

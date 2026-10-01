@@ -1,0 +1,49 @@
+{
+  "1": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "tests-d-audio_00009.flac"
+    },
+    "_meta": {
+      "title": "[$SONG]"
+    }
+  },
+  "2": {
+    "class_type": "SheetSage2AudioToABC",
+    "inputs": {
+      "mode": "full",
+      "audio_encoder": [
+        "3",
+        0
+      ],
+      "audio": [
+        "1",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "SheetSage2 Audio to ABC"
+    }
+  },
+  "3": {
+    "class_type": "AudioEncoderLoader",
+    "inputs": {
+      "audio_encoder_name": "sheetsage2_bf16.safetensors"
+    },
+    "_meta": {
+      "title": "Load Audio Encoder"
+    }
+  },
+  "5": {
+    "class_type": "PreviewAny",
+    "inputs": {
+      "source": [
+        "2",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Preview as Text"
+    }
+  }
+}

@@ -65,7 +65,8 @@ async def test_missing_items_and_optional_nodes(tmp_path):
     report = await requirements.check(_client(classes, models, flows, tmp_path))
     ready = {g["name"]: g["ready"] for g in report["groups"]}
     assert ready == {"image": False, "video": False, "audio": False}
-    assert requirements.missing_count(report) == 3
+    # easy ifElse counts twice: image and audio both need ComfyUI-Easy-Use
+    assert requirements.missing_count(report) == 4
     image = next(g for g in report["groups"] if g["name"] == "image")
     easy = next(n for n in image["nodes"] if n["package"] == "ComfyUI-Easy-Use")
     assert easy["missing_classes"] == ["easy ifElse"]

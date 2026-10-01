@@ -12,6 +12,10 @@ FROM python:3.12-slim-bookworm
 LABEL org.opencontainers.image.title="dreamer-mcp" \
       org.opencontainers.image.description="MCP server for ComfyUI (streamable HTTP)" \
       org.opencontainers.image.licenses="MIT"
+# abcm2ps + ghostscript: sheet music (ABC -> PDF) for the music tools
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends abcm2ps ghostscript \
+ && rm -rf /var/lib/apt/lists/*
 RUN useradd --uid 10001 --create-home app
 WORKDIR /app
 COPY --from=build --chown=app:app /app/.venv /app/.venv

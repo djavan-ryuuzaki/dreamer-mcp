@@ -16,8 +16,11 @@ Kubernetes) apontando para o ComfyUI onde quer que ele esteja. O modo stdio tamb
 ## Destaques
 
 - **Presets de um comando:** `comfyui_generate_image`, `comfyui_generate_asset`,
-  `comfyui_generate_video`, `comfyui_generate_audio` e `comfyui_upscale`, cada um ligado a um
-  workflow seu.
+  `comfyui_generate_video`, `comfyui_generate_music`, `comfyui_song_to_abc` e `comfyui_upscale`,
+  cada um ligado a um workflow seu.
+- **Música com partitura:** o YuE2 pode seguir uma partitura ABC sua (escrita por você ou por um
+  LLM), que é reescrita automaticamente no dialeto que o modelo entende; covers a partir de uma
+  música de referência.
 - **Gerar ou editar no mesmo workflow:** sem imagens, gera; com 1 a 9 imagens de referência, edita.
   Os slots não usados são removidos do grafo automaticamente.
 - **Assets transparentes:** PNG com canal alpha real, largura/altura exatas e cópias recortadas no
@@ -55,7 +58,10 @@ Kubernetes) apontando para o ComfyUI onde quer que ele esteja. O modo stdio tamb
 | `comfyui_generate_asset` | Preset `asset`: PNG com fundo transparente |
 | `comfyui_upscale` | Preset `upscale` |
 | `comfyui_generate_video` | Preset `video` |
-| `comfyui_generate_audio` | Preset `audio` |
+| `comfyui_generate_audio` | Preset `audio` (genérico: prompt + letra + duração) |
+| `comfyui_generate_music` | Presets `music` / `music_cover`: música com vocais, opcionalmente seguindo uma partitura ABC ou fazendo cover de uma música |
+| `comfyui_song_to_abc` | Preset `song_abc`: transcreve uma música para ABC (SheetSage2), com partitura em PDF |
+| `comfyui_normalize_abc` | Converte ABC qualquer para o dialeto do YuE2 e aponta problemas (sem executar nada) |
 
 ## Início rápido
 
@@ -112,8 +118,8 @@ estiverem faltando, atualize-o.
 |---|---|---|
 | ComfyUI (core) | imagem/asset | `TextEncodeQwenImage21`, `ModelAttentionBackend` |
 | ComfyUI (core) | vídeo | `MiniMaxH3ReferenceToVideo`, `ComfyMathExpression`, `ComfySwitchNode`, `ResolutionSelector` |
-| ComfyUI (core) | áudio | `YuE2GenerateABC`, `YuE2GenerateMusic`, `EmptyYuE2LatentAudio`, `SaveAudioAdvanced` |
-| [ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use) | imagem/asset | `easy ifElse`, `easy cleanGpuUsed`, `easy clearCacheAll` |
+| ComfyUI (core) | áudio | `YuE2GenerateABC`, `YuE2GenerateMusic`, `EmptyYuE2LatentAudio`, `SheetSage2AudioToABC`, `AudioEncoderLoader`, `LoadAudio`, `SaveAudio`, `SaveText`, `PreviewAny` |
+| [ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use) | imagem/asset/áudio | `easy ifElse`, `easy cleanGpuUsed`, `easy clearCacheAll` |
 | [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) *(opcional)* | imagem/asset | `SetNode`/`GetNode`: só para abrir e editar as versões de interface dos workflows |
 
 ### Modelos
@@ -140,11 +146,14 @@ Cada arquivo vai para `ComfyUI/models/<pasta>/`; subpastas também valem.
 
 A LoRA TaoMate acelera o vídeo para 3 passos.
 
-**Música com vocais** (`comfyui_generate_audio`), YuE2, ~4 GB:
+**Música com vocais** (`comfyui_generate_music`, `comfyui_song_to_abc`), YuE2 + SheetSage2, ~5,4 GB:
 
 | Arquivo | Pasta | Tamanho |
 |---|---|---|
 | [`yue2_3b_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/YuE2/resolve/main/checkpoints/yue2_3b_int8_convrot.safetensors) | `checkpoints` | 4,0 GB |
+| [`sheetsage2_bf16.safetensors`](https://huggingface.co/Comfy-Org/YuE2/resolve/main/audio_encoders/sheetsage2_bf16.safetensors) | `audio_encoders` | 1,4 GB |
+
+O SheetSage2 só é usado em covers e em `comfyui_song_to_abc`.
 
 Só é preciso instalar o que for usar: cada grupo funciona sozinho. Os workflows já vêm com o MCP
 (veja abaixo), então basta ter os nós e os modelos.
@@ -173,7 +182,10 @@ Os presets já vêm prontos, em [`workflows/`](workflows) (também embutidos no 
 | `generate_image.json` | `image` | Qwen Image 2.1: gera ou edita (1 a 9 referências) + upscale |
 | `generate_asset.json` | `asset` | Qwen Image 2.1: PNG com fundo transparente + upscale |
 | `minimax_h3_r2v.json` | `video` | MiniMax H3: vídeo com som a partir de 2 imagens de referência |
-| `yue2_text2music.json` | `audio` | YuE2: música com vocais a partir de estilo + letra |
+| `generate_music.json` | `audio`, `music` | YuE2: música com vocais a partir de estilo + letra, com partitura ABC opcional; devolve o áudio e o ABC usado (`.md`) |
+| `generate_cover_music.json` | `music_cover` | YuE2 + SheetSage2: cover (nova letra/estilo sobre a melodia de uma música) |
+| `generate_song_abc.json` | `song_abc` | SheetSage2: transcreve uma música para ABC |
+| `yue2_text2music.json` | – | YuE2: versão anterior (estilo + letra) |
 | `qwen_image_t2i.json` | – | Qwen Image 2.1: template original de texto para imagem |
 
 No manifesto, cada preset aponta primeiro para `comfyui:api/<nome>.json` e usa a cópia incluída
@@ -183,6 +195,55 @@ em `workflows/api/` no ComfyUI: ela passa a ter prioridade, sem redeploy.
 Se os seus modelos estiverem em subpastas (por exemplo `models/diffusion_models/QWEN/...`), não é
 preciso editar o workflow: um nome que não existe no ComfyUI é trocado automaticamente pelo arquivo
 de mesmo nome em uma subpasta, desde que haja só um.
+
+### Partituras ABC no YuE2
+
+O YuE2 **não interpreta** ABC: o `YuE2GenerateMusic` só tokeniza o texto e o coloca no prompt do
+modelo. Por isso a partitura só funciona se tiver a cara das que o próprio YuE2
+(`YuE2GenerateABC`) e o SheetSage2 escrevem:
+
+```
+X:1
+T:
+M:4/4
+L:1/16
+Q:1/4=104
+V: Vocal clef=treble name="Vocal Melody" snm="Vocal"
+V: Ins clef=treble name="Ins Melody" snm="Inst."
+K:G
+% verse
+V: Vocal
+"G"z2d2d2e2d2B2A4|"Em"G2z2A2B2G4z4|"Am"z2e2e2d2e2B2c4|"D"d2B2A2G2F2A2d4|
+V: Ins
+Z4|
+```
+
+Duas vozes intercaladas a cada (até) 4 compassos, `L:1/16`, seções como comentários `% verse`,
+`% chorus`..., acordes entre aspas no início do compasso (nenhum no modo `melody`) e **sem**
+linhas `w:` (a letra vai separada, com tags `[Verse]`/`[Chorus]` na mesma ordem das seções
+cantadas). Escreva também uma linha instrumental sob o vocal (respostas, levada, contracanto):
+com a voz `Ins` só em pausa (`Z4`) o arranjo tende a soar como playback de karaokê. Um ABC
+"normal" (uma ou duas vozes, `L:1/8`, `w:`, `%%text`/`P:`) é convertido automaticamente; a segunda
+voz (ex.: `V:Cavaco`, `V:Piano`) vira a `Ins`. A conversão é feita pelo parâmetro `abc`
+(`transform: yue2_abc` no manifesto); `comfyui_normalize_abc` mostra o resultado e os avisos
+antes de gerar.
+
+### Partitura em PDF
+
+`comfyui_generate_music` (músicas e covers) e `comfyui_song_to_abc` também devolvem a partitura em
+PDF (saída com `label: "score"`), gravada no ComfyUI em `output/dreamer-mcp/scores/` e entregue com
+os mesmos links da mídia:
+
+- se você (ou o LLM) passou `abc_notation`, a partitura é desse texto **original**, com a letra das
+  linhas `w:` e as seções do jeito que foram escritas, e sai já na resposta (`score`), mesmo com
+  `wait=false`;
+- senão, é do ABC que o workflow escreveu (YuE2 ou SheetSage2), criada quando o job termina: na
+  resposta com `wait=true`, ou em `comfyui_job_status` / `comfyui_get_output`.
+
+A renderização roda no próprio MCP, sem ComfyUI: `abcm2ps` (ABC → PostScript) + Ghostscript
+(PostScript → PDF). A imagem Docker já traz os dois; fora dela, instale-os
+(`apt install abcm2ps ghostscript`). Sem eles, a música é gerada normalmente e a resposta traz
+`score_error`. No manifesto, isso é a opção `score: {param: abc, output: abc}` do workflow.
 
 ### O manifesto `workflows.yaml`
 
@@ -265,6 +326,8 @@ de `<image1>` e, por fim, os defaults.
 | `append_when` | param de texto | Acrescenta um texto fixo quando um param `bool` é true |
 | `remove_when_true` | param `bool` | Remove nós quando o valor é true |
 | `trim_alpha` | workflow | Devolve também cópias das saídas transparentes recortadas no objeto |
+| `score` | workflow | Devolve também a partitura em PDF: do ABC passado em `param`, ou do texto ABC da saída `output` |
+| `transform` | param de texto | Reescreve o valor depois de aplicar todos os params, ex.: `{name: yue2_abc, lyrics: "[$LYRICS].value", mode: "8.mode"}` (os argumentos são lidos do grafo final); avisos voltam em `<param>_warnings` |
 
 Regras condicionais nunca sobrescrevem um param enviado explicitamente. Os presets aceitam `extra`
 para params adicionais ou overrides crus (`{"KSampler.cfg": 4}`), e `comfyui_run` sorteia as seeds
