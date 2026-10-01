@@ -70,13 +70,22 @@ groups:
         note: TaoMate 3-step LoRA (the workflow samples in 3 steps)
 
   audio:
-    title: Music with vocals (comfyui_generate_audio) - YuE2
-    workflows: [api/yue2_text2music.json]
+    title: Music with vocals (comfyui_generate_music, comfyui_song_to_abc) - YuE2 + SheetSage2
+    workflows: [api/generate_music.json, api/generate_cover_music.json, api/generate_song_abc.json]
     nodes:
       - package: ComfyUI
-        classes: [YuE2GenerateABC, YuE2GenerateMusic, EmptyYuE2LatentAudio, SaveAudioAdvanced]
+        classes: [YuE2GenerateABC, YuE2GenerateMusic, EmptyYuE2LatentAudio, SheetSage2AudioToABC,
+                  AudioEncoderLoader, LoadAudio, SaveAudio, SaveText, PreviewAny]
+      - package: ComfyUI-Easy-Use
+        url: https://github.com/yolain/ComfyUI-Easy-Use
+        classes: [easy ifElse, easy cleanGpuUsed, easy clearCacheAll]
     models:
       - file: yue2_3b_int8_convrot.safetensors
         folder: checkpoints
         size_gb: 4.0
         url: https://huggingface.co/Comfy-Org/YuE2/resolve/main/checkpoints/yue2_3b_int8_convrot.safetensors
+      - file: sheetsage2_bf16.safetensors
+        folder: audio_encoders
+        size_gb: 1.4
+        url: https://huggingface.co/Comfy-Org/YuE2/resolve/main/audio_encoders/sheetsage2_bf16.safetensors
+        note: Covers and comfyui_song_to_abc (audio -> ABC transcription)

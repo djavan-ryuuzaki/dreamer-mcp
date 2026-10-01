@@ -1,0 +1,268 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "yue2_3b_int8_convrot.safetensors"
+    },
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "3": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": "English, soulful jazz-pop, expressive male vocal, relaxed 88 BPM, Rhodes piano, upright bass, brushed drums, warm saxophone, subtle strings, intimate late-night atmosphere, rich and organic live-band production"
+    },
+    "_meta": {
+      "title": "[$STYLE]"
+    }
+  },
+  "4": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": "[Verse]\nMorning light across the window\nCity waking down below\nI can hear the streets are calling\nFeels like somewhere we should go\n\n[Chorus]\nRun with me into the sunlight\nLeave the shadows far behind\nWe don't need to know tomorrow\nTonight the whole world feels alive\n\n[Verse]\nRadio playing through the open door\nLaughing like we did before\nEvery mile becomes a memory\nAnd I just want a little more\n\n[Chorus]\nRun with me into the sunlight\nLeave the shadows far behind\nWe don't need to know tomorrow\nTonight the whole world feels alive"
+    },
+    "_meta": {
+      "title": "[$LYRICS]"
+    }
+  },
+  "5": {
+    "class_type": "SaveText",
+    "inputs": {
+      "filename_prefix": "dreamer-mcp/music/abc_cover_song",
+      "format": "md",
+      "text": [
+        "23",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Save Text"
+    }
+  },
+  "8": {
+    "class_type": "YuE2GenerateMusic",
+    "inputs": {
+      "style": [
+        "3",
+        0
+      ],
+      "lyrics": [
+        "4",
+        0
+      ],
+      "abc": [
+        "23",
+        0
+      ],
+      "seed": 1086185808571744,
+      "mode": "melody",
+      "max_duration": [
+        "15",
+        0
+      ],
+      "temperature": 1,
+      "top_p": 0.95,
+      "top_k": 100,
+      "repetition_penalty": 1.2,
+      "cfg_scale": 1,
+      "clip": [
+        "1",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "YuE2 Generate Music"
+    }
+  },
+  "9": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 42,
+      "steps": 32,
+      "cfg": 1,
+      "sampler_name": "dpm_2",
+      "scheduler": "sgm_uniform",
+      "denoise": 1,
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "8",
+        0
+      ],
+      "negative": [
+        "12",
+        0
+      ],
+      "latent_image": [
+        "10",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "10": {
+    "class_type": "EmptyYuE2LatentAudio",
+    "inputs": {
+      "seconds": [
+        "8",
+        1
+      ],
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Empty YuE2 Latent Audio"
+    }
+  },
+  "11": {
+    "class_type": "VAEDecodeAudio",
+    "inputs": {
+      "samples": [
+        "9",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "VAE Decode Audio"
+    }
+  },
+  "12": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {
+      "conditioning": [
+        "8",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Conditioning Zero Out"
+    }
+  },
+  "13": {
+    "class_type": "SaveAudio",
+    "inputs": {
+      "filename_prefix": "dreamer-mcp/music/full_cover_song",
+      "audio": [
+        "11",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Save Audio (FLAC) (DEPRECATED)"
+    }
+  },
+  "15": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 900
+    },
+    "_meta": {
+      "title": "[$MAX_SECONDS]"
+    }
+  },
+  "16": {
+    "class_type": "easy cleanGpuUsed",
+    "inputs": {
+      "anything": [
+        "11",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Clean VRAM Used"
+    }
+  },
+  "17": {
+    "class_type": "easy clearCacheAll",
+    "inputs": {
+      "anything": [
+        "16",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Clear Cache All"
+    }
+  },
+  "18": {
+    "class_type": "AudioEncoderLoader",
+    "inputs": {
+      "audio_encoder_name": "sheetsage2_bf16.safetensors"
+    },
+    "_meta": {
+      "title": "Load Audio Encoder"
+    }
+  },
+  "19": {
+    "class_type": "SheetSage2AudioToABC",
+    "inputs": {
+      "mode": "melody",
+      "audio_encoder": [
+        "18",
+        0
+      ],
+      "audio": [
+        "21",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "SheetSage2 Audio to ABC"
+    }
+  },
+  "21": {
+    "class_type": "LoadAudio",
+    "inputs": {
+      "audio": "yue2_reference_song.flac"
+    },
+    "_meta": {
+      "title": "Load Audio"
+    }
+  },
+  "22": {
+    "class_type": "PrimitiveBoolean",
+    "inputs": {
+      "value": true
+    },
+    "_meta": {
+      "title": "[$GERAR_ABC]"
+    }
+  },
+  "23": {
+    "class_type": "easy ifElse",
+    "inputs": {
+      "boolean": [
+        "22",
+        0
+      ],
+      "on_true": [
+        "19",
+        0
+      ],
+      "on_false": [
+        "24",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "If else"
+    }
+  },
+  "24": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": ""
+    },
+    "_meta": {
+      "title": "[$ABC_INPUT]"
+    }
+  }
+}

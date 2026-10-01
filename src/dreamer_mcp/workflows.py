@@ -26,16 +26,21 @@ from typing import Any
 
 import yaml
 
-from . import imaging
+from . import abc, imaging
 from .client import ComfyClient, ComfyUIError
 from .media import mime_type
 
 COMFYUI_PREFIX = "comfyui:"
 MANIFEST_NAMES = ("workflows.yaml", "workflows.yml")
-PRESET_KINDS = ("image", "asset", "upscale", "video", "audio")
+PRESET_KINDS = ("image", "asset", "upscale", "video", "audio", "music", "music_cover",
+                "song_abc")
 SEED_INPUTS = {"seed", "noise_seed"}
 MODEL_EXTS = (".safetensors", ".gguf", ".ckpt", ".pt", ".pth", ".bin", ".sft", ".onnx")
 MAX_SEED = 2**50
+TRANSFORMS: dict[str, Callable[..., tuple[str, list[str]]]] = {
+    # value, **{name: input read from the graph} -> (new value, warnings)
+    "yue2_abc": abc.for_yue2,
+}
 
 
 class WorkflowError(Exception):
@@ -68,6 +73,11 @@ class ParamSpec:
     flatten_alpha: str | None = None
     """For file/file_list: composite transparent images onto this color (e.g. "#ffffff")
     before ComfyUI's LoadImage drops the alpha channel."""
+    transform: dict[str, str] = field(default_factory=dict)
+    """For strings: {"name": "<TRANSFORMS key>", "<arg>": "<node>.<input>"...}. The value is
+    rewritten once every param is applied; each arg is read from that input of the final graph
+    (e.g. the lyrics or mode the workflow will actually use). Warnings are returned in
+    `applied` as "<param>_warnings"."""
 
     @classmethod
     def parse(cls, name: str, raw: Any) -> ParamSpec:
@@ -89,7 +99,18 @@ class ParamSpec:
             append_when={str(k): str(v) for k, v in (raw.get("append_when") or {}).items()},
             multiple_of=int(raw["multiple_of"]) if raw.get("multiple_of") else None,
             flatten_alpha=raw.get("flatten_alpha"),
+            transform=_parse_transform(name, raw.get("transform")),
         )
+
+
+def _parse_transform(param: str, raw: Any) -> dict[str, str]:
+    if not raw:
+        return {}
+    spec = {"name": raw} if isinstance(raw, str) else {str(k): str(v) for k, v in raw.items()}
+    if spec.get("name") not in TRANSFORMS:
+        raise WorkflowError(f"param '{param}': unknown transform {spec.get('name')!r} "
+                            f"(available: {', '.join(TRANSFORMS)})")
+    return spec
 
 
 def _as_list(value: Any) -> list[str]:
@@ -121,6 +142,9 @@ class WorkflowEntry:
     trim_alpha: dict[str, Any] = field(default_factory=dict)
     """{"outputs": [labels], "padding": 16, "param": "<bool param>"}: also return a copy of
     each transparent output cropped to its content."""
+    score: dict[str, str] = field(default_factory=dict)
+    """{"param": "<abc param>", "output": "<label>"}: also return the sheet music (PDF) of
+    the ABC the caller passed in `param`, or else of the ABC text produced by `output`."""
 
     @property
     def source(self) -> str:
@@ -160,6 +184,7 @@ def load_manifest(workflows_dir: Path) -> Manifest:
             outputs={str(k): str(v) for k, v in (spec.get("outputs") or {}).items()},
             size=dict(spec.get("size") or {}),
             trim_alpha=dict(spec.get("trim_alpha") or {}),
+            score={str(k): str(v) for k, v in (spec.get("score") or {}).items()},
         )
     return Manifest(presets=dict(raw.get("presets") or {}), workflows=workflows)
 
@@ -608,6 +633,19 @@ async def build_graph(
             touched.add(target)
         applied[name] = value
 
+    for name, spec in entry.params.items():
+        if spec.transform and isinstance(applied.get(name), str):
+            args = {k: _literal_input(graph, t) for k, t in spec.transform.items() if k != "name"}
+            try:
+                value, warnings = TRANSFORMS[spec.transform["name"]](applied[name], **args)
+            except ValueError as e:
+                raise WorkflowError(f"'{name}': {e}") from e
+            for target in spec.targets:
+                set_input(graph, target, value)
+            applied[name] = value
+            if warnings:
+                applied[f"{name}_warnings"] = warnings
+
     # Conditional overrides never replace a value the caller set explicitly.
     explicit = set(touched)
     rules = [entry.when_missing.get(n) for n in missing] + [entry.when_set.get(n) for n in params]
@@ -634,6 +672,13 @@ async def build_graph(
         randomize_seeds(graph, skip=touched)
     await resolve_model_paths(registry.client, graph)
     return graph, applied, ignored
+
+
+def _literal_input(graph: dict, target: str) -> Any:
+    """Value of "<node>.<input>" when it is a literal (not a link), else None."""
+    node_id, input_name = _split_target(graph, target)
+    value = (graph[node_id].get("inputs") or {}).get(input_name)
+    return None if _is_link(value) else value
 
 
 def _derive_size(rule: dict, params: dict, image_size: tuple[int, int] | None
@@ -731,7 +776,7 @@ def extract_outputs(entry: dict, links: LinkFn, include_temp: bool = False) -> l
     return files
 
 
-def extract_texts(entry: dict, max_len: int = 500) -> list[dict]:
+def extract_texts(entry: dict, max_len: int = 20000) -> list[dict]:
     """Text outputs (PreviewAny, LLM nodes...), truncated."""
     texts = []
     for node_id, node_out in (entry.get("outputs") or {}).items():

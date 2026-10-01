@@ -10,7 +10,7 @@ resources:
 images:
   - name: dreamer-mcp
     newName: docker.io/djavanryuuzaki/dreamer-mcp
-    newTag: "0.3.0"
+    newTag: "0.4.0"
 
 configMapGenerator:
   # Your API-format workflows + workflows.yaml. A change generates a new name -> automatic rollout.
@@ -22,6 +22,9 @@ configMapGenerator:
       - workflows/qwen_image_t2i.json
       - workflows/minimax_h3_r2v.json
       - workflows/yue2_text2music.json
+      - workflows/generate_music.json
+      - workflows/generate_cover_music.json
+      - workflows/generate_song_abc.json
       - workflows/txt2img.json
       - workflows/upscale.json
   - name: dreamer-mcp-config

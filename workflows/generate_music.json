@@ -1,0 +1,261 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "yue2_3b_int8_convrot.safetensors"
+    },
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "2": {
+    "class_type": "YuE2GenerateABC",
+    "inputs": {
+      "style": [
+        "3",
+        0
+      ],
+      "lyrics": [
+        "4",
+        0
+      ],
+      "seed": 576330663442413,
+      "mode": "full",
+      "max_abc_tokens": 8192,
+      "temperature": 0.7,
+      "top_p": 0.9,
+      "top_k": 30,
+      "repetition_penalty": 1.005,
+      "penalty_window": 100,
+      "clip": [
+        "1",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "YuE2 Generate ABC"
+    }
+  },
+  "3": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": "Upbeat indie pop with warm female vocals, bright electric guitars, punchy drums, melodic bass, and subtle synth layers. Catchy and energetic, with an uplifting summer atmosphere, a memorable chorus, and polished modern production."
+    },
+    "_meta": {
+      "title": "[$STYLE]"
+    }
+  },
+  "4": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": "[Verse]\nMorning light across the window\nCity waking down below\nI can hear the streets are calling\nFeels like somewhere we should go\n\n[Chorus]\nRun with me into the sunlight\nLeave the shadows far behind\nWe don't need to know tomorrow\nTonight the whole world feels alive\n\n[Verse]\nRadio playing through the open door\nLaughing like we did before\nEvery mile becomes a memory\nAnd I just want a little more\n\n[Chorus]\nRun with me into the sunlight\nLeave the shadows far behind\nWe don't need to know tomorrow\nTonight the whole world feels alive"
+    },
+    "_meta": {
+      "title": "[$LYRICS]"
+    }
+  },
+  "5": {
+    "class_type": "SaveText",
+    "inputs": {
+      "filename_prefix": "dreamer-mcp/music/abc_song",
+      "format": "md",
+      "text": [
+        "20",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Save Text"
+    }
+  },
+  "8": {
+    "class_type": "YuE2GenerateMusic",
+    "inputs": {
+      "style": [
+        "3",
+        0
+      ],
+      "lyrics": [
+        "4",
+        0
+      ],
+      "abc": [
+        "20",
+        0
+      ],
+      "seed": 39071367597222,
+      "mode": "full",
+      "max_duration": [
+        "15",
+        0
+      ],
+      "temperature": 1,
+      "top_p": 0.95,
+      "top_k": 100,
+      "repetition_penalty": 1.2,
+      "cfg_scale": 1,
+      "clip": [
+        "1",
+        1
+      ]
+    },
+    "_meta": {
+      "title": "YuE2 Generate Music"
+    }
+  },
+  "9": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 42,
+      "steps": 32,
+      "cfg": 1,
+      "sampler_name": "dpm_2",
+      "scheduler": "sgm_uniform",
+      "denoise": 1,
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "8",
+        0
+      ],
+      "negative": [
+        "12",
+        0
+      ],
+      "latent_image": [
+        "10",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "10": {
+    "class_type": "EmptyYuE2LatentAudio",
+    "inputs": {
+      "seconds": [
+        "8",
+        1
+      ],
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Empty YuE2 Latent Audio"
+    }
+  },
+  "11": {
+    "class_type": "VAEDecodeAudio",
+    "inputs": {
+      "samples": [
+        "9",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "VAE Decode Audio"
+    }
+  },
+  "12": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {
+      "conditioning": [
+        "8",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Conditioning Zero Out"
+    }
+  },
+  "13": {
+    "class_type": "SaveAudio",
+    "inputs": {
+      "filename_prefix": "dreamer-mcp/music/full_song",
+      "audio": [
+        "11",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Save Audio (FLAC) (DEPRECATED)"
+    }
+  },
+  "15": {
+    "class_type": "PrimitiveFloat",
+    "inputs": {
+      "value": 900
+    },
+    "_meta": {
+      "title": "[$MAX_SECONDS]"
+    }
+  },
+  "16": {
+    "class_type": "easy cleanGpuUsed",
+    "inputs": {
+      "anything": [
+        "11",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Clean VRAM Used"
+    }
+  },
+  "17": {
+    "class_type": "easy clearCacheAll",
+    "inputs": {
+      "anything": [
+        "16",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Clear Cache All"
+    }
+  },
+  "18": {
+    "class_type": "PrimitiveBoolean",
+    "inputs": {
+      "value": true
+    },
+    "_meta": {
+      "title": "[$GERAR_ABC]"
+    }
+  },
+  "19": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": "X:1\nT:Run Into the Sunlight\nM:4/4\nL:1/16\nQ:1/4=104\nV: Vocal clef=treble name=\"Vocal Melody\" snm=\"Vocal\"\nV: Ins clef=treble name=\"Ins Melody\" snm=\"Inst.\"\nK:G\n% intro\nV: Vocal\n\"G\"z16|\"G\"z16|\"Em\"z16|\"Em\"z16|\nV: Ins\nG,2G,2 z2D2 G2G2 z2D2 |G,2G,2 z2D2 G2G2 z2B,2 |E,2E,2 z2B,2 G2G2 z2B,2 |E,2E,2 z2B,2 G2G2 z2B,2 |\nV: Vocal\n\"C\"z16|\"C\"z16|\"D\"z16|\"D\"z16|\nV: Ins\nC,2C,2 z2G,2 E2E2 z2G,2 |C,2C,2 z2G,2 E2E2 z2G,2 |D,2D,2 z2A,2 F2F2 z2A2 |D,2D,2 z2A,2 F2F2 z2A2 |\n% verse\nV: Vocal\n\"G\"z2d2 d2e2 d2B2 A4 |\"Em\"G2z2 A2B2 G4 z4 |\"Am\"z2e2 e2d2 e2B2 c4 |\"D\"d2B2 A2G2 F2A2 d4 |\nV: Ins\nZ4|\nV: Vocal\n\"G\"z2d2 d2e2 d2B2 A4 |\"Em\"G2z2 A2B2 G4 z4 |\"Am\"z2c2 c2d2 e2c2 A4 |\"D\"B2A2 F2A2 G8 |\nV: Ins\nZ4|\n% pre-chorus\nV: Vocal\n\"C\"e4 e4 e4 d4 |\"D\"e4 d4 B4 d4 |\"Em\"e4 z4 e4 z4 |\"Em\"z4 z2e2 e2d2 B4 |\nV: Ins\nZ4|\n% chorus\nV: Vocal\n\"G\"e'4 e'2d'2 b4 a2b2 |\"D\"a2b2 a2f2 d4 z2d2 |\"Em\"e'4 e'2d'2 b4 a2b2 |\"C\"a2b2 a2g2 e4 e2d2 |\nV: Ins\nz2G2 D2G2 z2G2 D2G2 |z2A2 F2A2 z2A2 F2A2 |z2B2 G2B2 z2B2 G2B2 |z2G2 E2G2 z2G2 E2G2 |\nV: Vocal\n\"Am\"e'4 e'2d'2 c'4 b2c'2 |\"D\"d'4 c'2a2 f4 z2d2 |\"G\"b4 a2g2 e4 e2d2 |\"D\"c'2a2 f2a2 \"G\"g8 |\nV: Ins\nz2A2 E2A2 z2A2 E2A2 |z2A2 F2A2 z2A2 F2A2 |z2G2 D2G2 z2G2 D2G2 |z2A2 F2A2 z2A2 F2A2 |\n% interlude\nV: Vocal\n\"G\"z16|\"Em\"z16|\"C\"z16|\"D\"z16|\nV: Ins\ne'4 b4 a4 g2a2 |a2b2 a2g2 e8 |e'4 b4 a4 g2a2 |a2b2 a2g2 e8 |\n% verse\nV: Vocal\n\"G\"z2d2 d2e2 d2B2 A4 |\"Em\"G2z2 A2B2 G4 z4 |\"Am\"z2e2 e2d2 e2B2 c4 |\"D\"d2B2 A2G2 F2A2 d4 |\nV: Ins\nZ4|\nV: Vocal\n\"G\"z2d2 d2e2 d2B2 A4 |\"Em\"G2z2 A2B2 G4 z4 |\"Am\"z2c2 c2d2 e2c2 A4 |\"D\"B2A2 F2A2 G8 |\nV: Ins\nZ4|\n% pre-chorus\nV: Vocal\n\"C\"e4 e4 e4 d4 |\"D\"e4 d4 B4 d4 |\"Em\"e4 z4 e4 z4 |\"Em\"z4 z2e2 e2d2 B4 |\nV: Ins\nZ4|\n% chorus\nV: Vocal\n\"G\"e'4 e'2d'2 b4 a2b2 |\"D\"a2b2 a2f2 d4 z2d2 |\"Em\"e'4 e'2d'2 b4 a2b2 |\"C\"a2b2 a2g2 e4 e2d2 |\nV: Ins\nz2G2 D2G2 z2G2 D2G2 |z2A2 F2A2 z2A2 F2A2 |z2B2 G2B2 z2B2 G2B2 |z2G2 E2G2 z2G2 E2G2 |\nV: Vocal\n\"Am\"e'4 e'2d'2 c'4 b2c'2 |\"D\"d'4 c'2a2 f4 z2d2 |\"G\"b4 a2g2 e4 e2d2 |\"D\"c'2a2 f2a2 \"G\"g8 |\nV: Ins\nz2A2 E2A2 z2A2 E2A2 |z2A2 F2A2 z2A2 F2A2 |z2G2 D2G2 z2G2 D2G2 |z2A2 F2A2 z2A2 F2A2 |\n% bridge\nV: Vocal\n\"Em\"G4 G4 G4 A2B2 |\"Em\"c4 B4 G4 z4 |\"C\"e4 e4 d4 c4 |\"D\"B4 A4 F4 z2A2 |\nV: Ins\nZ4|\nV: Vocal\n\"D\"c'4 a4 f4 a4 |\"G\"g4 z4 z8 |\nV: Ins\nz2A2 F2A2 z2A2 F2A2 |z2G2 D2G2 z2G2 D2G2 |\n% interlude\nV: Vocal\n\"G\"z16|\"Em\"z16|\"C\"z16|\"D\"z16|\nV: Ins\ne'4 b4 a4 g2a2 |a2b2 a2g2 e8 |e'4 b4 a4 g2a2 |a2b2 a2g2 e8 |\n% pickup\nV: Vocal\n\"D\"z8 z2d'2 d'2d'2 |\nV: Ins\nz2A2 F2A2 z2A2 F2A2 |\n% chorus\nV: Vocal\n\"G\"e'4 e'2d'2 b4 a2b2 |\"D\"a2b2 a2f2 d4 z2d2 |\"Em\"e'4 e'2d'2 b4 a2b2 |\"C\"a2b2 a2g2 e4 e2d2 |\nV: Ins\nz2G2 D2G2 z2G2 D2G2 |z2A2 F2A2 z2A2 F2A2 |z2B2 G2B2 z2B2 G2B2 |z2G2 E2G2 z2G2 E2G2 |\nV: Vocal\n\"Am\"e'4 e'2d'2 c'4 b2c'2 |\"D\"d'4 c'2a2 f4 z2d2 |\"G\"b4 a2g2 e4 e2d2 |\"D\"c'2a2 f2a2 \"G\"g8 |\nV: Ins\nz2A2 E2A2 z2A2 E2A2 |z2A2 F2A2 z2A2 F2A2 |z2G2 D2G2 z2G2 D2G2 |z2A2 F2A2 z2A2 F2A2 |\n% outro\nV: Vocal\n\"G\"z16|\"G\"z16|\"Em\"z16|\"Em\"z16|\nV: Ins\nG,2G,2 z2D2 G2G2 z2D2 |G,2G,2 z2D2 G2G2 z2B,2 |E,2E,2 z2B,2 G2G2 z2B,2 |E,2E,2 z2B,2 G2G2 z2B,2 |\nV: Vocal\n\"C\"z16|\"C\"z16|\"D\"z16|\"G\"g8 z8 |\nV: Ins\nC,2C,2 z2G,2 E2E2 z2G,2 |C,2C,2 z2G,2 E2E2 z2G,2 |D,2D,2 z2A,2 F2F2 z2A2 |G2B2 d2g2 g8 |\n\n"
+    },
+    "_meta": {
+      "title": "[$ABC_INPUT]"
+    }
+  },
+  "20": {
+    "class_type": "easy ifElse",
+    "inputs": {
+      "boolean": [
+        "18",
+        0
+      ],
+      "on_true": [
+        "2",
+        0
+      ],
+      "on_false": [
+        "19",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "If else"
+    }
+  }
+}
