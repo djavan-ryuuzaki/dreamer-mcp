@@ -228,6 +228,24 @@ voz (ex.: `V:Cavaco`, `V:Piano`) vira a `Ins`. A conversão é feita pelo parâm
 (`transform: yue2_abc` no manifesto); `comfyui_normalize_abc` mostra o resultado e os avisos
 antes de gerar.
 
+**Para o YuE2 cantar a partitura com fidelidade.** Quando a partitura não "cabe" no que o modelo
+canta, ele improvisa e a música sai mais longa que o escrito (nos testes, +18% com poucas notas para
+uma letra em português, contra −1% com a partitura do próprio YuE2). O que ajuda:
+
+- **Notas suficientes para a letra:** cerca de uma nota por sílaba cantada, mais nos melismas.
+  Português e espanhol pedem mais notas do que as sílabas escritas sugerem; evite espremer vogais
+  (`do~a`) numa nota só.
+- **O ritmo do gênero, não só colcheias retas:** 3+3+2 no dance-pop, funk e reggaeton
+  (`g3f3e2` em `L:1/16`) e antecipações ligadas por cima do tempo ou da barra (`e2-|e2…`); síncope
+  no samba e no pagode; notas longas nas baladas.
+- **O refrão é o pico:** a nota mais alta do refrão acima da do verso e da do pré-refrão.
+- **Harmonia própria no pré-refrão** (o IV ou o ii, uma dominante) para criar tensão.
+- **Frases regulares** (2 ou 4 compassos, seções de 4 ou 8) e uma linha instrumental que muda entre
+  as seções (riff na intro, levada nos versos, mais cheia nos refrões).
+
+No ABC "normal", mantenha `T:` (título), `C:` (autores), os nomes de seção em `%%text` e a letra em
+`w:`: o YuE2 não usa, mas eles saem na partitura em PDF, que é o que o registro da música pede.
+
 ### Partitura em PDF
 
 `comfyui_generate_music` (músicas e covers) e `comfyui_song_to_abc` também devolvem a partitura em

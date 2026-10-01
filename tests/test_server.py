@@ -149,3 +149,10 @@ async def test_workflows_listing(fake):
     assert names["txt2img"]["preset"] == "image"
     assert names["txt2img"]["runnable"] is True
     assert "prompt" in names["txt2img"]["params"]
+
+
+async def test_music_tools_describe_the_abc_dialect():
+    tools = {t.name: t.description or "" for t in await server.mcp.list_tools()}
+    for name in ("comfyui_generate_music", "comfyui_normalize_abc"):
+        assert "V: Vocal" in tools[name] and "3+3+2" in tools[name], name
+    assert tools["comfyui_generate_music"].startswith("Generate a song with vocals")
