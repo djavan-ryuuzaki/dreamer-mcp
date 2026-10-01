@@ -69,7 +69,12 @@ async def render_pdf(abc: str) -> bytes:
         raise ScoreError("sheet music needs abcm2ps and ghostscript on the MCP server "
                          "(apt install abcm2ps ghostscript)")
     abcm2ps, gs = found
-    with tempfile.TemporaryDirectory(prefix="dreamer-score-") as tmp:
+    try:
+        workdir = tempfile.TemporaryDirectory(prefix="dreamer-score-")
+    except OSError as e:
+        raise ScoreError(f"no writable temp dir ({e}); with a read-only root filesystem mount "
+                         "an emptyDir at /tmp") from e
+    with workdir as tmp:
         Path(tmp, "score.abc").write_text(prepare(abc), encoding="utf-8")
         log = await _run(abcm2ps, "-q", "-O", "score.ps", "score.abc", cwd=tmp)
         ps = Path(tmp, "score.ps")
