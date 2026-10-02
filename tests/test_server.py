@@ -155,4 +155,6 @@ async def test_music_tools_describe_the_abc_dialect():
     tools = {t.name: t.description or "" for t in await server.mcp.list_tools()}
     for name in ("comfyui_generate_music", "comfyui_normalize_abc"):
         assert "V: Vocal" in tools[name] and "3+3+2" in tools[name], name
+        assert "a w: line right under every line of the sung voice" in tools[name], name
+        assert "(written by YuE2 or SheetSage2) has no" in tools[name], name
     assert tools["comfyui_generate_music"].startswith("Generate a song with vocals")

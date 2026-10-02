@@ -198,9 +198,43 @@ de mesmo nome em uma subpasta, desde que haja só um.
 
 ### Partituras ABC no YuE2
 
+**Escreva ABC "normal"**, com tudo o que o registro da música pede; o MCP converte para o YuE2 e
+gera o PDF a partir do texto original:
+
+```
+X:1
+T:Luz da Janela
+C:Letra e música: Fulano de Tal
+M:4/4
+L:1/8
+Q:1/4=104
+K:G
+V:Voz clef=treble name="Voz"
+V:Piano clef=treble name="Piano"
+%%text VERSO 1
+V:Voz
+"G"z2 B B A G G2|"D"A A B A A4|"Em"G G A B A G G2|"C"E G A G E4|
+w: A ma-nhã cha-mou|meu no-me bai-xo|e a ja-ne-la a-briu|de-va-gar o céu
+V:Piano
+G,2D2G2D2|F,2A,2D2A,2|E,2B,2E2B,2|C,2G,2C2G,2|
+```
+
+- `T:` (título, também nome do PDF), `C:` (autores) e seções em `%%text`;
+- cada voz sob a sua linha `V:` (ou com `[V:Voz]` no início da linha); a segunda voz vira a
+  linha instrumental do YuE2;
+- uma linha `w:` sob cada linha da voz cantada: uma sílaba por nota, hífen dentro da palavra, `|`
+  nas barras, `_` na nota que segura a sílaba anterior (inclusive a nota depois de uma ligadura
+  `-`, que senão recebe a próxima sílaba) e `*` na nota sem sílaba;
+- as tags `[Verse]`/`[Chorus]` do `lyrics` na mesma ordem das seções cantadas, com o mesmo texto
+  dos `w:`. Ao mudar a letra, reescreva os `w:`. O ABC que um job devolve (escrito pelo YuE2 ou
+  pelo SheetSage2) não tem letra: reenviado sem `w:`, a partitura em PDF sai só com as notas.
+
+O guia completo para um agente compor e anotar músicas está na skill
+[`skills/compor-musica`](skills/compor-musica/SKILL.md).
+
 O YuE2 **não interpreta** ABC: o `YuE2GenerateMusic` só tokeniza o texto e o coloca no prompt do
 modelo. Por isso a partitura só funciona se tiver a cara das que o próprio YuE2
-(`YuE2GenerateABC`) e o SheetSage2 escrevem:
+(`YuE2GenerateABC`) e o SheetSage2 escrevem, e é para isso que o ABC normal é convertido:
 
 ```
 X:1
@@ -221,10 +255,9 @@ Z4|
 Duas vozes intercaladas a cada (até) 4 compassos, `L:1/16`, seções como comentários `% verse`,
 `% chorus`..., acordes entre aspas no início do compasso (nenhum no modo `melody`) e **sem**
 linhas `w:` (a letra vai separada, com tags `[Verse]`/`[Chorus]` na mesma ordem das seções
-cantadas). Escreva também uma linha instrumental sob o vocal (respostas, levada, contracanto):
-com a voz `Ins` só em pausa (`Z4`) o arranjo tende a soar como playback de karaokê. Um ABC
-"normal" (uma ou duas vozes, `L:1/8`, `w:`, `%%text`/`P:`) é convertido automaticamente; a segunda
-voz (ex.: `V:Cavaco`, `V:Piano`) vira a `Ins`. A conversão é feita pelo parâmetro `abc`
+cantadas). Um ABC já nesse dialeto é mantido, só sem as linhas `w:` e `%%`. Escreva sempre uma
+linha instrumental sob o vocal (respostas, levada, contracanto): com a voz `Ins` só em pausa
+(`Z4`) o arranjo tende a soar como playback de karaokê. A conversão é feita pelo parâmetro `abc`
 (`transform: yue2_abc` no manifesto); `comfyui_normalize_abc` mostra o resultado e os avisos
 antes de gerar.
 
@@ -236,15 +269,12 @@ uma letra em português, contra −1% com a partitura do próprio YuE2). O que a
   Português e espanhol pedem mais notas do que as sílabas escritas sugerem; evite espremer vogais
   (`do~a`) numa nota só.
 - **O ritmo do gênero, não só colcheias retas:** 3+3+2 no dance-pop, funk e reggaeton
-  (`g3f3e2` em `L:1/16`) e antecipações ligadas por cima do tempo ou da barra (`e2-|e2…`); síncope
+  (`g3/2f3/2e` em `L:1/8`) e antecipações ligadas por cima do tempo ou da barra (`e-|e…`); síncope
   no samba e no pagode; notas longas nas baladas.
 - **O refrão é o pico:** a nota mais alta do refrão acima da do verso e da do pré-refrão.
 - **Harmonia própria no pré-refrão** (o IV ou o ii, uma dominante) para criar tensão.
 - **Frases regulares** (2 ou 4 compassos, seções de 4 ou 8) e uma linha instrumental que muda entre
   as seções (riff na intro, levada nos versos, mais cheia nos refrões).
-
-No ABC "normal", mantenha `T:` (título), `C:` (autores), os nomes de seção em `%%text` e a letra em
-`w:`: o YuE2 não usa, mas eles saem na partitura em PDF, que é o que o registro da música pede.
 
 ### Partitura em PDF
 

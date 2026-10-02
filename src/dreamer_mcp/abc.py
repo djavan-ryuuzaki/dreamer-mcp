@@ -68,6 +68,7 @@ _TOKEN = re.compile(
     r"|(?P<other>.)",
     re.DOTALL,
 )
+_INLINE_VOICE = re.compile(r"\[V:\s*([^\]]*)\]")
 _BAR = re.compile(r"\[\||\|\]|\|\||:\|\]?|\|:|::|\|(?:\d)?|\[\d")
 
 
@@ -286,6 +287,31 @@ def _convert(abc: str) -> tuple[str, list[str]]:
 
     unit = Fraction(1, 8)
     parser = _BarParser(unit, warnings)
+
+    def add_music(target: str, line: str) -> None:
+        text = pending[target] + line
+        pos = 0
+        for m in _BAR.finditer(text):
+            bar_text = text[pos:m.start()]
+            pos = m.end()
+            sym = m.group(0)
+            bars = getattr(current(), target)
+            if bar_text.strip():
+                events, rests = parser.parse(bar_text)
+                if events:
+                    bars.append(events)
+                bars.extend([[]] * rests)
+            if sym in ("|:", "::"):
+                repeat_start[target] = len(bars)
+            if sym.startswith(":|") or sym == "::":
+                bars.extend(bars[repeat_start.get(target) or 0:])
+                repeat_start[target] = len(bars) if sym == "::" else None
+            if re.fullmatch(r"\|\d|\[\d|:\|\d", sym) or (sym.startswith(":|") and len(sym) > 2
+                                                        and sym[-1].isdigit()):
+                warnings.append("numbered repeat endings ([1 / [2) are not supported; "
+                                "write the bars out instead")
+        pending[target] = text[pos:]
+
     for raw in abc.replace("\r\n", "\n").split("\n"):
         line = raw.strip()
         if not line:
@@ -328,33 +354,17 @@ def _convert(abc: str) -> tuple[str, list[str]]:
             continue
         if not in_body:
             continue
-        target = role(voice) if voice is not None else "bars"
-        if target is None:
-            continue
         line = re.sub(r"%.*$", "", line)
         line = line.removesuffix("\\")
-        text = pending[target] + line
-        pos = 0
-        for m in _BAR.finditer(text):
-            bar_text = text[pos:m.start()]
-            pos = m.end()
-            sym = m.group(0)
-            bars = getattr(current(), target)
-            if bar_text.strip():
-                events, rests = parser.parse(bar_text)
-                if events:
-                    bars.append(events)
-                bars.extend([[]] * rests)
-            if sym in ("|:", "::"):
-                repeat_start[target] = len(bars)
-            if sym.startswith(":|") or sym == "::":
-                bars.extend(bars[repeat_start.get(target) or 0:])
-                repeat_start[target] = len(bars) if sym == "::" else None
-            if re.fullmatch(r"\|\d|\[\d|:\|\d", sym) or (sym.startswith(":|") and len(sym) > 2
-                                                        and sym[-1].isdigit()):
-                warnings.append("numbered repeat endings ([1 / [2) are not supported; "
-                                "write the bars out instead")
-        pending[target] = text[pos:]
+        # inline [V:name] fields switch voices like V: lines: [music, name, music, name, ...]
+        for i, part in enumerate(_INLINE_VOICE.split(line)):
+            if i % 2:
+                voice = part.split()[0] if part.strip() else ""
+                role(voice)
+                continue
+            target = role(voice) if voice is not None else "bars"
+            if target is not None and part.strip():
+                add_music(target, part)
     for target, text in pending.items():
         if text.strip():
             events, rests = parser.parse(text)
