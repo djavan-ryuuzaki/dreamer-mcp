@@ -10,7 +10,7 @@ resources:
 images:
   - name: dreamer-mcp
     newName: docker.io/djavanryuuzaki/dreamer-mcp
-    newTag: "0.4.3"
+    newTag: "0.4.4"
 
 configMapGenerator:
   # Your API-format workflows + workflows.yaml. A change generates a new name -> automatic rollout.

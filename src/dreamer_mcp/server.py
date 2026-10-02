@@ -24,6 +24,7 @@ from .client import ComfyClient, ComfyUIError
 from .config import get_settings
 from .convert import convert_ui_to_api
 from .media import MEDIA_PREFIX, MediaLinks, MediaSigner, make_media_handler, media_kind
+from .progress import ProgressTracker
 from .workflows import (
     WorkflowEntry,
     WorkflowError,
@@ -61,6 +62,7 @@ mcp = MCPServer(name="dreamer-mcp", instructions=INSTRUCTIONS, version=__version
 _client: ComfyClient | None = None
 _registry: WorkflowRegistry | None = None
 _media: MediaLinks | None = None
+_tracker: ProgressTracker | None = None
 _scores: dict[str, dict] = {}  # prompt_id -> score output rendered from the workflow's ABC
 
 
@@ -69,6 +71,16 @@ def client() -> ComfyClient:
     if _client is None:
         _client = ComfyClient(get_settings())
     return _client
+
+
+def tracker() -> ProgressTracker | None:
+    """Live progress over ComfyUI's WebSocket, bound to the client_id prompts are queued with."""
+    global _tracker
+    if not get_settings().comfyui_progress:
+        return None
+    if _tracker is None or _tracker.client_id != client().client_id:
+        _tracker = ProgressTracker(get_settings(), client().client_id)
+    return _tracker
 
 
 def registry() -> WorkflowRegistry:
@@ -183,6 +195,8 @@ async def _job_status(prompt_id: str, include_temp: bool = False,
         else:
             state = "success" if status.get("completed", True) else "running"
         result: dict[str, Any] = {"prompt_id": prompt_id, "status": state}
+        if state == "running":
+            _add_progress(result)
         if state == "error":
             result["error"] = extract_error(entry)
         result["outputs"] = extract_outputs(entry, media().links, include_temp)
@@ -198,7 +212,7 @@ async def _job_status(prompt_id: str, include_temp: bool = False,
 
     q = await c.queue()
     if any(item[1] == prompt_id for item in q.get("queue_running", [])):
-        return {"prompt_id": prompt_id, "status": "running"}
+        return _add_progress({"prompt_id": prompt_id, "status": "running"})
     pending = sorted(q.get("queue_pending", []), key=lambda item: item[0])
     for pos, item in enumerate(pending, start=1):
         if item[1] == prompt_id:
@@ -207,12 +221,30 @@ async def _job_status(prompt_id: str, include_temp: bool = False,
     return {"prompt_id": prompt_id, "status": "not_found"}
 
 
+def _add_progress(result: dict[str, Any]) -> dict[str, Any]:
+    t = tracker()
+    if t is not None and (progress := t.get(result["prompt_id"])):
+        result["progress"] = progress
+    return result
+
+
 def _progress_message(status: dict[str, Any]) -> str:
     if status["status"] == "pending":
         position = status.get("queue_position")
         total = status.get("queue_size")
         return f"queued, position {position} of {total}" if total else f"queued, position {position}"
-    return status["status"]
+    p = status.get("progress")
+    if status["status"] != "running" or not p:
+        return status["status"]
+    parts = ["running"]
+    if "node_type" in p or "node" in p:
+        parts.append(p.get("node_title") or p.get("node_type") or f"node {p['node']}")
+    if p.get("steps"):
+        step = f"step {p['step']}/{p['steps']}"
+        parts.append(f"{step} ({p['percent']}%)" if "percent" in p else step)
+    if p.get("nodes_total"):
+        parts.append(f"node {p['nodes_done']}/{p['nodes_total']}")
+    return ", ".join(parts)
 
 
 async def _cancel_job(prompt_id: str) -> dict[str, Any]:
@@ -295,8 +327,12 @@ async def _execute(
         reg, entry, params=params, overrides=inputs, randomize=randomize_seed, graph=graph
     )
     score_out = await _prepare_score(entry, graph, params or {})
+    if (t := tracker()) is not None:
+        await t.ensure_connected()  # before submitting: ComfyUI only tells the socket it knows
     submitted = await client().submit(graph)
     prompt_id = submitted["prompt_id"]
+    if t is not None:
+        t.register(prompt_id, graph)
     result: dict[str, Any] = {"workflow": entry.name, "prompt_id": prompt_id}
     if isinstance(score_out, str):
         result["score_error"] = score_out
@@ -681,7 +717,9 @@ async def comfyui_convert_workflow(
 @tool_errors
 async def comfyui_job_status(prompt_id: str) -> dict[str, Any]:
     """Status of a job: pending (with queue_position), running, success, error, interrupted,
-    or not_found. Finished jobs include their output files (and sheet music for music jobs)."""
+    or not_found. Running jobs queued by this server include `progress`: the node being executed
+    (node_type), its sampling step/steps and percent, nodes_done/nodes_total and elapsed_s.
+    Finished jobs include their output files (and sheet music for music jobs)."""
     return await _job_status(prompt_id, scores=True)
 
 

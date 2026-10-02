@@ -47,7 +47,7 @@ Kubernetes) apontando para o ComfyUI onde quer que ele esteja. O modo stdio tamb
 | `comfyui_save_workflow` | Salva no ComfyUI o workflow (formato API) de um job do histórico |
 | `comfyui_convert_workflow` | Converte um workflow do formato UI para API (sem executar) |
 | `comfyui_run` | Executa um workflow (por nome ou JSON inline) com params/overrides |
-| `comfyui_job_status` | pending (posição na fila) / running / success / error / interrupted |
+| `comfyui_job_status` | pending (posição na fila) / running (nó atual, passo do sampling, %) / success / error / interrupted |
 | `comfyui_cancel` | Remove da fila ou interrompe o job em execução |
 | `comfyui_get_output` | Arquivos gerados + links de download/streaming |
 | `comfyui_view_image` | Retorna a imagem (reduzida) para o modelo ver |
@@ -413,6 +413,24 @@ e áudio também vêm como blocos `resource_link` com o tipo MIME. Com `MCP_PUBL
 
 Sem `MCP_PUBLIC_URL` (ou em stdio), os links apontam para o `/view` do ComfyUI.
 
+### Progresso dos jobs
+
+Enquanto um job roda, `comfyui_job_status` traz `progress` com o nó em execução e o passo do
+sampling:
+
+```json
+{"status": "running", "progress": {"node": "115", "node_type": "KSampler", "step": 20,
+ "steps": 30, "percent": 67, "nodes_done": 18, "nodes_total": 22, "elapsed_s": 108.6}}
+```
+
+Com `wait=true`, as notificações de progresso do MCP mostram o mesmo resumo
+(`running, KSampler, step 20/30 (67%), node 18/22`). O ComfyUI só envia esses dados pelo WebSocket
+`/ws` e só para o `client_id` que enfileirou o prompt, então o servidor mantém uma conexão com o
+mesmo id dos envios. Jobs enfileirados por outro cliente (a interface web, ou outra réplica do
+MCP) aparecem só como `running`, sem `progress`. Se o WebSocket estiver inacessível, nada quebra:
+o status volta a ser só pending/running. `percent` é do nó atual (cada sampler conta de novo do
+zero); `nodes_total` conta todos os nós do grafo, inclusive os que o ComfyUI acaba não executando.
+
 ## Configuração
 
 | Variável | Padrão | Descrição |
@@ -420,6 +438,7 @@ Sem `MCP_PUBLIC_URL` (ou em stdio), os links apontam para o `/view` do ComfyUI.
 | `COMFYUI_URL` | `http://127.0.0.1:8188` | URL usada pelo servidor para acessar o ComfyUI |
 | `COMFYUI_PUBLIC_URL` | = `COMFYUI_URL` | Base das URLs diretas devolvidas |
 | `COMFYUI_API_KEY` | – | Bearer enviado ao ComfyUI (se estiver atrás de um proxy com auth) |
+| `COMFYUI_PROGRESS` | `true` | Acompanhar os jobs pelo WebSocket do ComfyUI (nó e passo em `running`) |
 | `WORKFLOWS_DIR` | `workflows` (`/app/workflows` na imagem) | Pasta dos workflows + `workflows.yaml`; se não existir, usa os incluídos no pacote |
 | `WORKFLOWS_FROM_COMFYUI` | `true` | Listar também os workflows salvos no ComfyUI |
 | `DEFAULT_WAIT_TIMEOUT` | `300` | Segundos de espera quando `wait=true` |
