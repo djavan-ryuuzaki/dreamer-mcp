@@ -9,6 +9,7 @@ from dreamer_mcp.config import Settings
 from dreamer_mcp.workflows import (
     WorkflowRegistry,
     _split_target,
+    build_graph,
     load_manifest,
     normalize_graph,
     resolve_model_paths,
@@ -93,3 +94,36 @@ def test_packaged_workflows_when_dir_is_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "PACKAGED_WORKFLOWS", packaged)
     assert Settings(workflows_dir=tmp_path / "nope").workflows_path == packaged
     assert Settings(workflows_dir=tmp_path).workflows_path == tmp_path
+
+
+OUTPUT_CLASSES = {"SaveImage", "easy cleanGpuUsed", "easy clearCacheAll"}
+
+
+def _executed(graph: dict) -> set[str]:
+    """Nodes ComfyUI runs: the output nodes and everything upstream of them."""
+    todo = [nid for nid, n in graph.items() if n["class_type"] in OUTPUT_CLASSES]
+    seen: set[str] = set()
+    while todo:
+        nid = todo.pop()
+        if nid not in seen:
+            seen.add(nid)
+            todo += [str(v[0]) for v in graph[nid]["inputs"].values()
+                     if isinstance(v, list) and len(v) == 2]
+    return seen
+
+
+async def test_upscale_off_skips_the_second_sampling_pass():
+    manifest = load_manifest(REPO_WORKFLOWS)
+    reg = WorkflowRegistry(_client(lambda r: httpx.Response(404)), REPO_WORKFLOWS,
+                           include_comfyui=False)
+    for name in ("generate_image", "generate_asset"):
+        entry = manifest.workflows[name]
+        raw = json.loads((REPO_WORKFLOWS / entry.fallback).read_text(encoding="utf-8"))
+        samplers = lambda g: {k for k in _executed(g) if g[k]["class_type"] == "KSampler"}
+        on, _, _ = await build_graph(reg, entry, {"prompt": "a fox"},
+                                     graph=normalize_graph(raw, name))
+        off, _, _ = await build_graph(reg, entry, {"prompt": "a fox", "upscale": False},
+                                      graph=normalize_graph(raw, name))
+        assert len(samplers(on)) == 2, name
+        assert len(samplers(off)) == 1, name
+        assert "160" in off  # the base image is still saved

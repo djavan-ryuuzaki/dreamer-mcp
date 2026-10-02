@@ -57,7 +57,9 @@ workflows:
       aspect_ratio:    {type: string, description: "e.g. 16:9, 3:4, 21:9, 5:4 or 1.5; converted to width/height"}
       megapixels:      {type: float, description: "Image area, 1.0 = ~1024x1024 (default 1.0)"}
       keep_resolution: {target: "[$MANTER_RESOLUCAO].value", type: bool, description: "Editing: let the encoder size the image from <image1> (~1 MP) instead of width/height"}
-      upscale:         {remove_when_false: ["118"], type: bool, default: true, description: "Also return the upscaled image"}
+      # 117 (the upscale VAEDecode), not just its SaveImage 118: the Clean VRAM/Clear Cache output
+      # nodes 158/159 hang off 117 too, and would keep running the second KSampler (115).
+      upscale:         {remove_when_false: ["117"], type: bool, default: true, description: "Also return the upscaled image (skipping it also skips the second sampling pass)"}
       save_base:       {remove_when_false: ["160"], type: bool, default: true, description: "Also return the base image"}
       upscale_factor:  {target: "155.scale_by", type: float, description: "Upscale factor (default 1.5)"}
       seed:            {target: ["62.seed", "115.seed"], type: seed}
@@ -110,7 +112,9 @@ workflows:
       height:          {target: "[$HEIGHT].value", type: int, default: 1024, multiple_of: 16}
       trim:            {type: bool, default: true, description: "Also return copies cropped to the object"}
       keep_resolution: {target: "[$MANTER_RESOLUCAO].value", type: bool, description: "Editing: keep the size of <image1>"}
-      upscale:         {remove_when_false: ["118"], type: bool, default: true, description: "Also return the upscaled image"}
+      # 117 (the upscale VAEDecode), not just its SaveImage 118: the Clean VRAM/Clear Cache output
+      # nodes 158/159 hang off 117 too, and would keep running the second KSampler (115).
+      upscale:         {remove_when_false: ["117"], type: bool, default: true, description: "Also return the upscaled image (skipping it also skips the second sampling pass)"}
       save_base:       {remove_when_false: ["160"], type: bool, default: true, description: "Also return the base image"}
       upscale_factor:  {target: "155.scale_by", type: float}
       seed:            {target: ["62.seed", "115.seed"], type: seed}

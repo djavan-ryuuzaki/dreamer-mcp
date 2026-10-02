@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     comfyui_timeout: float = 30.0
     """Timeout in seconds for individual HTTP requests to ComfyUI."""
 
+    comfyui_progress: bool = True
+    """Follow jobs over ComfyUI's WebSocket, so status shows the running node and sampling step.
+    Without it (or when the socket is unreachable) status only says pending/running."""
+
     # --- Workflows ---------------------------------------------------------------------------
     workflows_dir: Path = Path("workflows")
     """Directory with API-format workflow JSON files and the optional workflows.yaml manifest."""
