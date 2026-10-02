@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import httpx
@@ -152,3 +153,9 @@ w: oh oh oh
     # a third voice is dropped with a warning
     _, warnings = abc.to_yue2(two_voices.replace("V:Cavaco\n| z8", "V:Bass\n| C8 |\nV:Cavaco\n| z8"))
     assert warnings == ["voice 'Bass' ignored (only a melody and an instrumental voice are used)"]
+    # inline [V:...] fields switch voices like V: lines do, at the start of a line or mid-line
+    inline = re.sub(r"^V:(\w+)\n(?=[|\"])", r"[V:\1] ", two_voices, flags=re.MULTILINE)
+    assert "[V:Voz] | \"D\"F2" in inline and "\nV:Voz\n|" not in inline
+    assert abc.to_yue2(inline) == (out, [])
+    one_line = inline.replace('[V:Voz] | "A"c2 e2 a4 |', '[V:Voz] | "A"c2 e2 a4 | [V:Cavaco] e8 |')
+    assert abc.to_yue2(one_line)[0].endswith('% chorus\nV: Vocal\n"A"c4e4a8|\nV: Ins\ne16|\n')

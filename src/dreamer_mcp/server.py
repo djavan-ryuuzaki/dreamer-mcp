@@ -954,34 +954,39 @@ async def comfyui_generate_audio(
     )
 
 
-ABC_DIALECT = """YuE2 does not parse ABC: the score is fed to the model as text, so it must look like the scores
-YuE2 itself writes. Any ABC is rewritten into that dialect automatically; writing it directly
-gives the most control:
-  header X:1 / T: / M:4/4 / L:1/16 / Q:1/4=<bpm> / V: Vocal ... / V: Ins ... / K:<key>
-  sections as comment lines "% intro", "% verse", "% pre-chorus", "% chorus", "% bridge",
-  "% interlude", "% outro"; inside them, up to 4 bars of "V: Vocal" (sung melody, chord symbol
-  in quotes at the start of a bar, rests z16) followed by the same bars of "V: Ins"
-  (instrumental line, or Z4 = 4 bars of rest); no w: lyric lines (lyrics are a separate input,
-  with [Verse]/[Chorus] tags in the same order as the sung sections); mode "melody" uses no
-  chord symbols.
+ABC_DIALECT = """Write the score as standard ABC: it is rewritten into the dialect YuE2 was trained on
+automatically, and the sheet music (PDF) is printed from your text as given, so it carries
+everything a song registration needs:
+  - header X:1 / T:<title> / C:<authors> / M:4/4 / L:1/8 / Q:1/4=<bpm> / K:<key>;
+  - each section opened by "%%text <NAME>" (INTRO, VERSO 1, PRÉ-REFRÃO, REFRÃO, PONTE, OUTRO...);
+  - the sung voice and an instrumental voice, each block under its V: line (V:Voz, then
+    V:Piano / V:Cavaco / V:Violão...); chord symbols in quotes at the start of the sung voice's
+    bars, in the instrumental voice only where the singer rests (none at all in mode "melody");
+  - a w: line right under every line of the sung voice: one syllable per note, hyphens inside
+    words (ma-nhã), "|" where the bars fall, "_" for a note that holds the previous syllable
+    (also the note after a tie), "*" for a note with no syllable.
+The [Verse]/[Chorus] tags of `lyrics` follow the sung sections of the score, in the same order and
+with the same words as the w: lines. To change the lyrics, rewrite the w: lines too (and the notes,
+when the syllable count changes). The ABC a job returns (written by YuE2 or SheetSage2) has no
+lyrics: add T:, C:, section names and w: lines under its "V: Vocal" lines before passing it back,
+so its sheet music shows the words.
 An instrumental line under the vocals (fills, comping, counter-melody) makes the arrangement
-much richer than "Z4" rests, which tend to sound like a karaoke backing: in plain ABC write it as
-a second voice (e.g. V:Voz + V:Cavaco / V:Piano), it becomes the Ins voice.
-Plain ABC may keep T: (title), C: (authors), %%text section names and w: lyrics under the notes:
-they are dropped for YuE2 but printed on the sheet music (PDF), which is what a song
-registration needs.
+much richer than rests, which tend to sound like a karaoke backing; it becomes YuE2's Ins voice.
 Writing a score YuE2 sings faithfully (when it doesn't fit, the model improvises and the song
 runs longer than the score):
   - give the lyrics enough notes: about one note per sung syllable, more for melismas; Portuguese
     and Spanish need more notes than the written syllables suggest, so avoid squeezing vowels
     (do~a) into one note;
-  - use the genre's rhythm, not only straight eighths: dance-pop/funk/reggaeton 3+3+2
-    (e.g. g3f3e2 at L:1/16) and anticipations tied over the beat or bar (e2-|e2...); samba/pagode
+  - use the genre's rhythm, not only straight eighths: dance-pop/funk/reggaeton 3+3+2 (e.g.
+    g3/2f3/2e at L:1/8) and anticipations tied over the beat or bar (e-|e...); samba/pagode
     syncopation; ballads with longer notes;
   - make the chorus the peak: its highest note above the verse and the pre-chorus;
   - give the pre-chorus its own harmony (e.g. the IV or ii chord, a dominant) to build tension;
   - keep regular phrases (2 or 4 bars, sections of 4 or 8 bars) and vary the instrumental line
-    between sections (riff in the intro, comping in verses, fuller in choruses)."""
+    between sections (riff in the intro, comping in verses, fuller in choruses).
+YuE2's own dialect (what comfyui_normalize_abc returns): L:1/16, "V: Vocal" and "V: Ins" blocks
+interleaved every 4 bars, sections as "% verse" / "% chorus" comments, no lyrics. A score already
+in it is kept as is, minus its w: and %% lines."""
 
 
 def _with_abc_dialect(fn):
