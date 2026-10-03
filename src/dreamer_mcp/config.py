@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     mcp_auth_token: str | None = None
     """When set, HTTP clients must send `Authorization: Bearer <token>`."""
 
+    mcp_max_request_mb: int = 64
+    """Largest HTTP request body accepted, in MiB. The MCP SDK's own default (4 MiB) rejects
+    with 413 a `comfyui_upload_file` of an image of ~3 MB, since it travels as base64 in JSON."""
+
     mcp_public_url: str | None = None
     """External base URL of this MCP server (e.g. https://dreamer-mcp.example.com). In HTTP mode
     it enables /media: outputs are returned as signed, expiring links streamed through the MCP
