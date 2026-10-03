@@ -55,6 +55,8 @@ def build_http_app() -> ASGIApp:
         stateless_http=True,
         json_response=False,
         host=s.mcp_host,
+        # Uploads (comfyui_upload_file) carry whole images as base64 in the JSON body.
+        max_request_body_size=s.mcp_max_request_mb * 1024 * 1024,
     )
     if s.mcp_auth_token:
         app = BearerAuthMiddleware(app, s.mcp_auth_token)

@@ -446,6 +446,7 @@ zero); `nodes_total` conta todos os nós do grafo, inclusive os que o ComfyUI ac
 | `MCP_TRANSPORT` | `stdio` (`http` na imagem) | `stdio` ou `http` |
 | `MCP_HOST` / `MCP_PORT` / `MCP_PATH` | `0.0.0.0` / `8000` / `/mcp` | Endpoint HTTP |
 | `MCP_AUTH_TOKEN` | – | Se definido, exige `Authorization: Bearer <token>` |
+| `MCP_MAX_REQUEST_MB` | `64` | Maior corpo de requisição HTTP aceito, em MiB (um upload vai em base64 no JSON) |
 | `MCP_PUBLIC_URL` | – | URL externa deste MCP; ativa os links de mídia |
 | `MEDIA_SECRET` | derivado do `MCP_AUTH_TOKEN` | Chave HMAC dos links (igual em todas as réplicas) |
 | `MEDIA_LINK_TTL` | `86400` | Validade dos links de mídia, em segundos |
