@@ -4,7 +4,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from dreamer_mcp import design, imaging
 from dreamer_mcp.client import ComfyClient
@@ -164,6 +164,21 @@ def test_split_alpha_cuts_objects_and_keeps_labels_whole():
     assert Image.open(io.BytesIO(pieces[0][1])).mode == "RGBA"
     assert len(imaging.split_alpha(_png(img), whole=True)) == 1
     assert imaging.split_alpha(_png(Image.new("RGB", (64, 64), "red"))) == []
+
+
+def test_split_alpha_keeps_large_title_letters_together():
+    img = Image.new("RGBA", (960, 544), (0, 0, 0, 0))
+    paint = lambda box: img.paste((255, 210, 70, 255), box)
+    draw = ImageDraw.Draw(img)
+    for x in (214, 293, 369, 436, 519, 613, 685):  # "DREAMER": 87 px stroked glyphs
+        draw.rectangle((x, 149, x + 67, 235), outline=(255, 210, 70, 255), width=14)
+    for x in (100, 320, 540):  # big buttons on one row, wide and well apart
+        paint((x, 330, x + 180, 400))
+    for x in (100, 200, 300):  # square icons with an icon-sized gap
+        paint((x, 450, x + 60, 510))
+    boxes = [b for b, _ in imaging.split_alpha(_png(img))]
+    assert len(boxes) == 1 + 3 + 3
+    assert boxes[0][0] == 210 and boxes[0][2] == 681 + 72 - 210 + 4
 
 
 def test_split_alpha_keep_full_keeps_canvas_filling_object():

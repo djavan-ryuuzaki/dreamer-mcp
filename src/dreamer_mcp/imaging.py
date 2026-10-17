@@ -257,9 +257,12 @@ def _components(grid: Image.Image, gw: int, gh: int) -> list[list[int]]:
 
 def _merge_text_lines(regions: list[list[int]], gw: int, max_text: float) -> list[list[int]]:
     """Join text-sized regions (height <= max_text cells) that sit on one line with at most
-    about one letter height between them: the words of a label."""
+    about one letter height between them: the words of a label. Taller regions of similar
+    height join only across letter spacing and only if they are strokes rather than solid
+    plates, so a large title stays whole while a row of buttons or icons does not."""
     boxes = [(min(i % gw for i in r), min(i // gw for i in r),
               max(i % gw for i in r) + 1, max(i // gw for i in r) + 1) for r in regions]
+    fill = [len(r) / ((x1 - x0) * (y1 - y0)) for r, (x0, y0, x1, y1) in zip(regions, boxes, strict=True)]
     parent = list(range(len(regions)))
 
     def find(i: int) -> int:
@@ -271,11 +274,17 @@ def _merge_text_lines(regions: list[list[int]], gw: int, max_text: float) -> lis
     for a, (ax0, ay0, ax1, ay1) in enumerate(boxes):
         for b, (bx0, by0, bx1, by1) in enumerate(boxes[a + 1:], a + 1):
             ha, hb = ay1 - ay0, by1 - by0
-            if max(ha, hb) > max_text:
-                continue
             overlap = min(ay1, by1) - max(ay0, by0)
             space = max(bx0 - ax1, ax0 - bx1)
-            if overlap >= 0.6 * min(ha, hb) and space <= 1.2 * max(ha, hb):
+            if overlap < 0.6 * min(ha, hb):
+                continue
+            if max(ha, hb) <= max_text:
+                limit = 1.2 * max(ha, hb)
+            elif min(ha, hb) >= 0.5 * max(ha, hb) and fill[a] < 0.85 and fill[b] < 0.85:
+                limit = 0.4 * max(ha, hb)
+            else:
+                continue
+            if space <= limit:
                 parent[find(a)] = find(b)
     merged: dict[int, list[int]] = {}
     for i, r in enumerate(regions):
