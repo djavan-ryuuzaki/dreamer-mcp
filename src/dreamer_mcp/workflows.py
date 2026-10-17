@@ -69,6 +69,9 @@ class ParamSpec:
     append_when: dict[str, str] = field(default_factory=dict)
     """For strings: {"<bool param>": "text"} appended when that param is true, e.g. a fixed
     instruction added to the prompt."""
+    prepend_when: dict[str, str] = field(default_factory=dict)
+    """For strings: {"<bool param>": "text"} put on its own line before the value when that
+    param is true (for fixed prefixes a model expects first)."""
     multiple_of: int | None = None
     """For ints: round to the nearest multiple (e.g. 16 for image sizes)."""
     flatten_alpha: str | None = None
@@ -98,6 +101,7 @@ class ParamSpec:
             remove_when_false=_as_list(raw.get("remove_when_false")),
             remove_when_true=_as_list(raw.get("remove_when_true")),
             append_when={str(k): str(v) for k, v in (raw.get("append_when") or {}).items()},
+            prepend_when={str(k): str(v) for k, v in (raw.get("prepend_when") or {}).items()},
             multiple_of=int(raw["multiple_of"]) if raw.get("multiple_of") else None,
             flatten_alpha=raw.get("flatten_alpha"),
             transform=_parse_transform(name, raw.get("transform")),
@@ -146,6 +150,11 @@ class WorkflowEntry:
     trim_alpha: dict[str, Any] = field(default_factory=dict)
     """{"outputs": [labels], "padding": 16, "param": "<bool param>"}: also return a copy of
     each transparent output cropped to its content."""
+    split_alpha: dict[str, Any] = field(default_factory=dict)
+    """{"outputs": [labels], "padding": 4, "param": "<bool param>", "gap": "<float param>",
+    "whole": "<list param>"}: also cut each transparent output into one PNG per object
+    (imaging.split_alpha), returned with its bbox. Outputs named in the `whole` param (by
+    label or by their number, e.g. 3 for "layer_03") stay one object."""
     score: dict[str, str] = field(default_factory=dict)
     """{"param": "<abc param>", "output": "<label>"}: also return the sheet music (PDF) of
     the ABC the caller passed in `param`, or else of the ABC text produced by `output`."""
@@ -190,6 +199,7 @@ def load_manifest(workflows_dir: Path) -> Manifest:
                           for k, v in (spec.get("batch_labels") or {}).items()},
             size=dict(spec.get("size") or {}),
             trim_alpha=dict(spec.get("trim_alpha") or {}),
+            split_alpha=dict(spec.get("split_alpha") or {}),
             score={str(k): str(v) for k, v in (spec.get("score") or {}).items()},
         )
     return Manifest(presets=dict(raw.get("presets") or {}), workflows=workflows)
@@ -603,6 +613,10 @@ async def build_graph(
             if extra and base and base[-1] not in ".!?":
                 base += "."
             value = " ".join([base, *extra])
+        if value is not None and spec.prepend_when:
+            first = [text.strip() for flag_name, text in spec.prepend_when.items()
+                     if flag(flag_name)]
+            value = "\n".join([*first, str(value)])
         if spec.type == "file_list":
             uploaded = [f.name for f in files[name]]
             for target, v in zip(spec.targets, uploaded, strict=False):

@@ -6,6 +6,7 @@ import asyncio
 import fnmatch
 import functools
 import io
+import json
 import re
 import time
 import uuid
@@ -30,6 +31,7 @@ from .workflows import (
     WorkflowEntry,
     WorkflowError,
     WorkflowRegistry,
+    _decode_source,
     build_graph,
     editable_inputs,
     extract_error,
@@ -37,6 +39,7 @@ from .workflows import (
     extract_texts,
     normalize_graph,
     param_choices,
+    parse_file_ref,
     upload_input_file,
 )
 
@@ -344,6 +347,9 @@ async def _execute(
     if result.get("status") == "success" and entry.trim_alpha:
         result["outputs"] = result.get("outputs", []) + await _trim_outputs(
             entry, applied, result.get("outputs", []))
+    if result.get("status") == "success" and entry.split_alpha:
+        result["outputs"] = result.get("outputs", []) + await _split_outputs(
+            entry, applied, result.get("outputs", []))
     content: list[Any] = [result]
     if result.get("status") == "success":
         content.extend(_resource_links(result.get("outputs", [])))
@@ -425,9 +431,7 @@ async def _trim_outputs(entry: WorkflowEntry, applied: dict[str, Any],
     labels = cfg.get("outputs")
     c, trimmed = client(), []
     for out in outputs:
-        label = out.get("label") or ""
-        if not _is_image(out["filename"]) or (
-                labels and not any(fnmatch.fnmatchcase(label, pat) for pat in labels)):
+        if not _is_image(out["filename"]) or not _label_matches(out.get("label") or "", labels):
             continue
         data = imaging.trim_alpha((await c.view(out["filename"], out["subfolder"], out["type"])).content,
                                   padding=int(cfg.get("padding", 0)))
@@ -443,6 +447,53 @@ async def _trim_outputs(entry: WorkflowEntry, applied: dict[str, Any],
             "mime_type": "image/png", **media().links(filename, subfolder, "output"),
         })
     return trimmed
+
+
+def _label_matches(label: str, patterns: list[str] | None) -> bool:
+    return not patterns or any(fnmatch.fnmatchcase(label, pat) for pat in patterns)
+
+
+def _is_whole(label: str, whole: Any) -> bool:
+    """`label` is listed in `whole` by name or by its trailing number ("layer_03" <- 3)."""
+    items = whole if isinstance(whole, list) else [] if whole is None else [whole]
+    number = re.search(r"(\d+)$", label)
+    return any(str(w) == label or (number and str(w).isdigit() and int(w) == int(number[1]))
+               for w in items)
+
+
+async def _split_outputs(entry: WorkflowEntry, applied: dict[str, Any],
+                         outputs: list[dict]) -> list[dict]:
+    """Cut transparent outputs into one PNG per object, saved next to the originals; each
+    piece has its `bbox` [x, y, w, h] in the coordinates of its source output (`canvas`)."""
+    cfg = entry.split_alpha
+    if cfg.get("param") and not applied.get(cfg["param"], True):
+        return []
+    gap = applied.get(cfg.get("gap", ""))
+    whole = applied.get(cfg.get("whole", ""))
+    c, pieces = client(), []
+    for out in outputs:
+        label = out.get("label") or ""
+        if not _is_image(out["filename"]) or not _label_matches(label, cfg.get("outputs")):
+            continue
+        data = (await c.view(out["filename"], out["subfolder"], out["type"])).content
+        canvas = PILImage.open(io.BytesIO(data)).size
+        kwargs = {"padding": int(cfg.get("padding", 4)), "whole": _is_whole(label, whole)}
+        if gap is not None:
+            kwargs["gap"] = float(gap)
+        stem = PurePosixPath(out["filename"]).stem.rstrip("_")
+        for k, (box, png) in enumerate(await anyio.to_thread.run_sync(
+                functools.partial(imaging.split_alpha, data, **kwargs)), 1):
+            name = f"{stem}_asset_{k:02d}.png"
+            saved = await c.upload(png, name, overwrite=True, type_="output",
+                                   subfolder=out["subfolder"])
+            filename, subfolder = saved.get("name", name), saved.get("subfolder", out["subfolder"])
+            pieces.append({
+                "node": out["node"], "label": f"{label or 'image'}_asset_{k:02d}",
+                "kind": out["kind"], "filename": filename, "subfolder": subfolder,
+                "type": "output", "mime_type": "image/png", "bbox": list(box),
+                "canvas": list(canvas), **media().links(filename, subfolder, "output"),
+            })
+    return pieces
 
 
 async def _run_preset(kind: str, workflow: str | None, params: dict[str, Any],
@@ -925,6 +976,9 @@ async def comfyui_generate_ui_design(
     height: int | None = None,
     aspect_ratio: str | None = None,
     megapixels: float | None = None,
+    transparent: bool = False,
+    asset_gap: float | None = None,
+    attempts: int = 4,
     seed: int | None = None,
     steps: int | None = None,
     extra: dict[str, Any] | None = None,
@@ -942,15 +996,39 @@ async def comfyui_generate_ui_design(
     "1:1") and/or megapixels (default 2.0, the model's limit is ~2048 px per side).
     `applied.prompt` is the caption that was used (with the real aspect_ratio): keep it, and
     change it to edit the design with comfyui_edit_ui_design.
+    `transparent=true` renders on a transparent background (RGBA PNG) for loose assets: an
+    icon, a button, a sprite sheet or an icon set. List only the objects: a full-canvas
+    background layer (even an "empty" one) makes the model paint an opaque canvas, so it is
+    removed. It also returns one PNG per object ("design_asset_01"..., with `bbox`);
+    objects closer than `asset_gap` (fraction of the longest side, default 0.004) stay one.
+    Whether the model actually paints alpha depends on the seed (about 1 in 3), so without a
+    fixed `seed` an opaque result is generated again with a new seed, up to `attempts` times;
+    `transparent_attempts` says how many it took.
 
     `extra` sets more workflow params or raw "<node>.<input>" overrides; `workflow` swaps the
     preset for another workflow."""
-    return await _run_preset(
-        "ui_design", workflow,
-        {"prompt": _caption(caption), "width": width, "height": height,
-         "aspect_ratio": aspect_ratio, "megapixels": megapixels, "seed": seed, "steps": steps},
-        extra, wait=wait, timeout=timeout, preview=preview, ctx=ctx,
-    )
+    params = {"prompt": _caption(caption), "width": width, "height": height,
+              "aspect_ratio": aspect_ratio, "megapixels": megapixels, "transparent": transparent,
+              "asset_gap": asset_gap, "seed": seed, "steps": steps}
+    tries = max(1, attempts) if transparent and wait and seed is None else 1
+    for attempt in range(1, tries + 1):
+        content = await _run_preset("ui_design", workflow, params, extra, wait=wait,
+                                    timeout=timeout, preview=preview, ctx=ctx)
+        result = content[0]
+        if tries == 1 or result.get("status") != "success":
+            return content
+        design_out = next((o for o in result.get("outputs", []) if o.get("label") == "design"),
+                          None)
+        if design_out is None:
+            return content
+        data = (await client().view(design_out["filename"], design_out["subfolder"],
+                                    design_out["type"])).content
+        result["transparent_attempts"] = attempt
+        if imaging.transparent_fraction(data) >= 0.02:
+            return content
+    result["warning"] = (f"still opaque after {tries} attempts (the model paints alpha only for "
+                         "some seeds): try again, or cut the objects out with comfyui_decompose_ui")
+    return content
 
 
 @mcp.tool(structured_output=False)
@@ -977,10 +1055,12 @@ async def comfyui_edit_ui_design(
     `caption` says what to change, in either form:
     - A short instruction in English (recommended; required to move or remove elements): name
       each element by its visible text, say where it goes and what is left in its old place,
-      and end with "Keep everything else exactly the same.", e.g. 'Move the "QUIT" button out
-      of the left menu column to the bottom-right corner, keeping its style. Remove it from
-      its old place: the column now ends with the "CREDITS" button and the area below it
-      shows only the background. Keep everything else exactly the same.'
+      name the neighbors that must stay (else the model may remove them too), and end with
+      "Keep everything else exactly the same.", e.g. 'Move only the "QUIT" button out of the
+      left menu column to the bottom-right corner, keeping its style. The "NEW GAME",
+      "CONTINUE", "OPTIONS" and "CREDITS" buttons stay exactly where they are. Where "QUIT"
+      used to be, below "CREDITS", show only the background. Keep everything else exactly
+      the same.'
     - The full Figma-style JSON caption of the result (same rules as
       comfyui_generate_ui_design), to restyle or re-render the whole design. The model keeps
       what it sees in <image1>, so with a caption a moved element stays in its old place too.
@@ -996,6 +1076,35 @@ async def comfyui_edit_ui_design(
     )
 
 
+async def _source_image(value: str) -> bytes:
+    """Bytes of an image given as URL, data URI, base64 or ComfyUI file reference."""
+    data, _ = await _decode_source(client(), value)
+    if data is None:
+        data = (await client().view(*parse_file_ref(value))).content
+    return data
+
+
+def _region(region: list[int], size: tuple[int, int]) -> tuple[int, int, int, int]:
+    if len(region) != 4:
+        raise ToolError("`region` is [x, y, width, height] in pixels of `image`.")
+    x, y, w, h = (int(v) for v in region)
+    x, y = max(0, x), max(0, y)
+    w, h = min(w, size[0] - x), min(h, size[1] - y)
+    if w < 16 or h < 16:
+        raise ToolError(f"`region` {region} is outside the {size[0]}x{size[1]} image or too small.")
+    return x, y, w, h
+
+
+async def _sheet(outputs: list[dict], max_size: int, columns: int = 4) -> Image | None:
+    c = client()
+    items = [(o.get("label") or o["filename"],
+              (await c.view(o["filename"], o["subfolder"], o["type"])).content) for o in outputs]
+    try:
+        return Image(data=imaging.contact_sheet(items, max_size, columns), format="jpeg")
+    except ValueError:
+        return None
+
+
 @mcp.tool(structured_output=False)
 @_with_guide(design.LAYERS_GUIDE)
 @tool_errors
@@ -1003,8 +1112,12 @@ async def comfyui_decompose_ui(
     image: str,
     layers: list[str] | None = None,
     num_layers: int | None = None,
+    whole_layers: list[int] | None = None,
+    region: list[int] | None = None,
     megapixels: float = 1.0,
-    trim: bool = True,
+    split: bool = True,
+    asset_gap: float | None = None,
+    trim: bool = False,
     seed: int | None = None,
     steps: int | None = None,
     extra: dict[str, Any] | None = None,
@@ -1013,17 +1126,32 @@ async def comfyui_decompose_ui(
     preview: bool = True,
     ctx: Context | None = None,
 ) -> list[Any]:
-    """Split a flattened design (UI screen, banner, poster) into transparent RGBA layers - e.g.
-    to reuse its buttons, logo, character and background as assets - with Ming Image 0.1
-    Design-Layer (preset "ui_decompose"). `image`: URL, base64, ComfyUI input filename, or
-    "<subfolder>/<name> [output]" for a previous result.
+    """Split a flattened design (UI screen, banner, poster, slide) into transparent RGBA layers
+    and cut them into reusable assets (each button, label, icon, logo, character) with Ming
+    Image 0.1 Design-Layer (preset "ui_decompose"). `image`: URL, base64, ComfyUI input
+    filename, or "<subfolder>/<name> [output]" for a previous result.
     `layers`: one description per layer, FRONT-most first, background last (how to write them
-    below); or only `num_layers` to let the model choose. More layers = more VRAM and time.
-    Returns "composite" (the recomposed full image), then "layer_01" (front-most) ...
-    "layer_NN" (background), each full-canvas so they stack back in place, plus (`trim`,
-    default on) "layer_01_trimmed"... cropped to their content, ready to use as assets.
-    `megapixels` is the working area (1.0 recommended, 0.25 is faster); the image keeps its
-    aspect ratio. The preview shows every layer in one contact sheet.
+    below). Write that plan from the image: it separates far better than the fallbacks, which
+    are `num_layers` alone (the model chooses) or, with neither, a generic 4-layer request
+    (text, image, container, background) meant for web pages with photos; on game or app UIs
+    it tends to mix plates, labels and artwork. More layers = more VRAM and time.
+    Returns "composite" (the recomposed full image), "layer_01" (front-most) ... "layer_NN"
+    (background), full-canvas so they stack back in place, and (`split`, default on) one PNG
+    per object of each layer: "layer_01_asset_01"..., in reading order, each with `bbox`
+    [x, y, w, h] in layer pixels and `source_bbox` in pixels of `image`. A "manifest" JSON
+    file lists them all. Objects closer than `asset_gap` (fraction of the longest side,
+    default 0.004) are one asset, as are the words of a label; `whole_layers` (layer numbers)
+    keeps a layer as one asset, e.g. a logo or a character whose parts would come apart.
+    `region` [x, y, w, h] (pixels of `image`) decomposes only that part, at full working
+    resolution: use it to re-separate one object that came out mixed (pass a layer file as
+    `image` and the object's bbox), and source_bbox still points into `image`. The last layer
+    is always the opaque background (a layer passed as `image` is flattened onto white), so
+    end such a plan with "Plain white background" after the objects to separate.
+    `megapixels` is the working area (1.0 recommended, 0.25 is faster); the aspect ratio is
+    kept. `trim` also returns each layer cropped to its content. The previews are contact
+    sheets of the layers and of the assets. Check them: a layer may miss or mix objects, and
+    one more decomposition with a prompt that names the defect (same `seed`) is usually
+    enough; otherwise crop or regenerate that asset.
 
     `extra` sets more workflow params or raw "<node>.<input>" overrides; `workflow` swaps the
     preset for another workflow."""
@@ -1031,24 +1159,63 @@ async def comfyui_decompose_ui(
         prompt, count = design.layers_prompt(layers, num_layers)
     except ValueError as e:
         raise ToolError(str(e)) from e
+    source_img = imaging.open_image(await _source_image(image))
+    if source_img is None:
+        raise ToolError(f"Cannot read {image!r} as an image.")
+    area = (0, 0, *source_img.size)
+    target = image
+    if region:
+        area = _region(region, source_img.size)
+        buf = io.BytesIO()
+        source_img.crop((area[0], area[1], area[0] + area[2], area[1] + area[3])).save(buf, "PNG")
+        target = (await client().upload(buf.getvalue(), f"mcp_{uuid.uuid4().hex[:12]}.png"))["name"]
     content = await _run_preset(
         "ui_decompose", workflow,
-        {"prompt": prompt, "num_layers": count, "images": [image], "megapixels": megapixels,
+        {"prompt": prompt, "num_layers": count, "images": [target], "megapixels": megapixels,
+         "split": split, "asset_gap": asset_gap, "whole_layers": whole_layers or None,
          "trim": trim, "seed": seed, "steps": steps},
         extra, wait=True, timeout=timeout, preview=False, ctx=ctx,
     )
     result = content[0]
-    if preview and result.get("status") == "success":
-        full = [o for o in result.get("outputs", [])
-                if _is_image(o["filename"]) and not str(o.get("label", "")).endswith("_trimmed")]
-        c = client()
-        items = [(o.get("label") or o["filename"],
-                  (await c.view(o["filename"], o["subfolder"], o["type"])).content) for o in full]
-        try:
-            sheet = imaging.contact_sheet(items, max(get_settings().preview_max_size, 1024))
-            content.append(Image(data=sheet, format="jpeg"))
-        except ValueError:
-            pass
+    if result.get("status") != "success":
+        return content
+    applied = result.get("applied", {})
+    canvas = (int(applied.get("width") or area[2]), int(applied.get("height") or area[3]))
+    sx, sy = area[2] / canvas[0], area[3] / canvas[1]
+    outputs = result.get("outputs", [])
+    for out in outputs:
+        if "bbox" in out:
+            x, y, w, h = out["bbox"]
+            out["source_bbox"] = [round(area[0] + x * sx), round(area[1] + y * sy),
+                                  round(w * sx), round(h * sy)]
+    full = [o for o in outputs if _is_image(o["filename"])
+            and not o.get("label", "").endswith("_trimmed") and "bbox" not in o]
+    assets = [o for o in outputs if "bbox" in o]
+    if full:
+        manifest = {
+            "source": image, "source_size": list(source_img.size),
+            "region": list(area) if region else None, "canvas": list(canvas), "prompt": prompt,
+            "layers": [{
+                "label": o.get("label"), "filename": o["filename"], "subfolder": o["subfolder"],
+                "assets": [{k: a[k] for k in ("label", "filename", "bbox", "source_bbox")}
+                           for a in assets if a["label"].startswith(f"{o.get('label')}_asset_")],
+            } for o in full],
+        }
+        name = f"{PurePosixPath(full[0]['filename']).stem.rstrip('_')}_manifest.json"
+        saved = await client().upload(json.dumps(manifest, indent=1).encode(), name,
+                                      overwrite=True, type_="output",
+                                      subfolder=full[0]["subfolder"])
+        filename = saved.get("name", name)
+        subfolder = saved.get("subfolder", full[0]["subfolder"])
+        outputs.append({"node": full[0]["node"], "label": "manifest", "kind": "manifest",
+                        "filename": filename, "subfolder": subfolder, "type": "output",
+                        "mime_type": "application/json",
+                        **media().links(filename, subfolder, "output")})
+    if preview:
+        size = max(get_settings().preview_max_size, 1024)
+        for sheet in (await _sheet(full, size), await _sheet(assets, size, columns=6)):
+            if sheet is not None:
+                content.append(sheet)
     return content
 
 

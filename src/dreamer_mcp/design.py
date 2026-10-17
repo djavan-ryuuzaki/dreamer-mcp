@@ -69,6 +69,24 @@ the text - do not merge it into the text layer or into the background.
 the subject (tables, boards, floors, shadows, gradients, patterns) - these are NOT separate layers.
 - Write directly about the content; do not mention "image" or narrate reasoning."""
 
+# The default request of Ming's ling-ui-design skill: four coarse layers (front to back) that
+# separate rendered text, artwork, UI chrome and the empty canvas.
+DEFAULT_LAYERS = [
+    "(text): All designed overlay text.",
+    ("(image): All photographs and illustrations, complete and text-free, including pictures "
+     "that appear inside cards."),
+    ("(container): Empty UI chrome: navigation bars, buttons, badges, ribbons, colored section "
+     "banners, and empty card or panel frames. Keep their colors and shapes. Do not include "
+     "photographs."),
+    "(background): Remaining empty page canvas only. No photographs. No overlay text.",
+]
+PRESERVE = ("Preserve the source composition and geometry exactly. Keep reusable photographs and "
+            "illustrations high-detail with clean boundaries; do not resize, reposition, blur, or "
+            "simplify them.")
+
+# One of the fixed phrases Ming was trained on for RGBA output; it goes at the very start.
+TRANSPARENT_PREFIX = "RGBA, 4-channel, transparent background"
+
 _COORDS = re.compile(
     r"^\s*cx:\s*(-?[\d.]+)\s*,\s*cy:\s*(-?[\d.]+)\s*,\s*w:\s*(-?[\d.]+)\s*,\s*h:\s*(-?[\d.]+)\s*$")
 _HEX = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
@@ -111,15 +129,27 @@ def _coords(value: Any, where: str, warnings: list[str]) -> str:
     return str(value)
 
 
+def _full_canvas(layer: Any) -> bool:
+    if not isinstance(layer, dict):
+        return False
+    m = _COORDS.match(_coords(layer.get("coordinates", ""), "", []))
+    return bool(m) and float(m.group(3)) >= 0.95 and float(m.group(4)) >= 0.95
+
+
 def ming_caption(caption: Any, width: Any = None, height: Any = None) -> tuple[str, list[str]]:
     """Check a Figma-style caption and set its aspect_ratio from the real size. Plain-text
     prompts are passed through (Ming also accepts them). Returns (caption text, warnings)."""
     text = caption_text(caption)
-    if not text.lstrip().startswith("{"):
+    # A short fixed prefix (e.g. TRANSPARENT_PREFIX) may precede the JSON object.
+    start = text.find("{")
+    prefix, body = (text[:start], text[start:]) if start >= 0 else (text, "")
+    if not body or len(prefix) > 200:
         return text, []
     try:
-        data = json.loads(text)
+        data = json.loads(body)
     except json.JSONDecodeError as e:
+        if prefix.strip():
+            return text, []  # plain text that happens to contain a brace
         return text, [f"caption is not valid JSON ({e}); sent as plain text"]
     if not isinstance(data, dict):
         return text, []
@@ -139,6 +169,14 @@ def ming_caption(caption: Any, width: Any = None, height: Any = None) -> tuple[s
         warnings.append(f"canvas_settings is missing {', '.join(missing)}")
 
     layers = data.get("layers")
+    if prefix.strip() == TRANSPARENT_PREFIX and isinstance(layers, list):
+        # A full-canvas layer (even an "empty transparent background") makes Ming paint an
+        # opaque canvas: a transparent design lists only its objects.
+        kept = [lay for lay in layers if not _full_canvas(lay)]
+        if len(kept) < len(layers):
+            warnings.append(f"removed {len(layers) - len(kept)} full-canvas background layer(s): "
+                            "a transparent design lists only its objects")
+            layers = data["layers"] = kept
     if not isinstance(layers, list) or not layers:
         warnings.append("layers should be a non-empty list, background first")
         layers = []
@@ -167,7 +205,8 @@ def ming_caption(caption: Any, width: Any = None, height: Any = None) -> tuple[s
     for q in sorted({q for r in relations for q in _QUOTED.findall(r)}):
         warnings.append(f'"{q}" is quoted in hierarchy_and_relation (keep rendered text in '
                         "descriptions only)")
-    return json.dumps(data, ensure_ascii=False), warnings
+    prefix = prefix.strip()
+    return (f"{prefix}\n" if prefix else "") + json.dumps(data, ensure_ascii=False), warnings
 
 
 _COUNT = re.compile(r"(?:Number of layers:\s*|into\s+)(\d+)(?:\s+layers)?", re.IGNORECASE)
@@ -177,7 +216,8 @@ def layers_prompt(layers: list[str] | str | None = None, num_layers: int | None 
                   ) -> tuple[str, int]:
     """Build the decomposition request. `layers` (front-most first) gives one description per
     layer; a ready "Decompose this image into N layers..." text is used as is; with only
-    `num_layers` the model plans the layers itself. Returns (prompt, layer count)."""
+    `num_layers` the model plans the layers itself; with neither, the default 4-layer request
+    (text, image, container, background). Returns (prompt, layer count)."""
     if isinstance(layers, str):
         text = layers.strip()
         if text.lower().startswith("decompose"):
@@ -186,13 +226,16 @@ def layers_prompt(layers: list[str] | str | None = None, num_layers: int | None 
                 raise ValueError('the decomposition text must say "Number of layers: N"')
             return text, int(m.group(1))
         layers = [line for line in text.splitlines() if line.strip()]
-    if layers:
-        items = [re.sub(r"^\s*Layer\s*\d+\s*:\s*", "", str(d)).strip() for d in layers]
-        n = len(items)
-        lines = [f"Decompose this image into {n} layers with the following specifications:", "",
-                 f"Number of layers: {n}"]
-        lines += [f"Layer {i}: {d}" for i, d in enumerate(items, 1)]
-        return "\n".join(lines), n
-    if num_layers:
+    if not layers and num_layers:
         return f"Decompose this image into {int(num_layers)} layers.", int(num_layers)
-    raise ValueError("give `layers` (one description per layer, front-most first) or num_layers")
+    preset = not layers
+    items = DEFAULT_LAYERS if preset else [
+        re.sub(r"^\s*Layer\s*\d+\s*:\s*", "", str(d)).strip() for d in layers]
+    n = len(items)
+    lines = [f"Decompose this image into {n} layers with the following specifications:", "",
+             f"Number of layers: {n}"]
+    if preset:
+        lines.append(PRESERVE)
+    sep = " " if preset else ": "  # the preset reads "Layer 1 (text): ..."
+    lines += [f"Layer {i}{sep}{d}" for i, d in enumerate(items, 1)]
+    return "\n".join(lines), n

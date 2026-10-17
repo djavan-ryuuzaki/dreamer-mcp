@@ -54,6 +54,16 @@ def test_caption_warnings():
     assert "image_style" in text
 
 
+def test_prefix_before_the_caption_is_kept():
+    text, warnings = design.ming_caption(
+        design.TRANSPARENT_PREFIX + "\n" + json.dumps(CAPTION), 1024, 1024)
+    prefix, _, body = text.partition("\n")
+    assert prefix == design.TRANSPARENT_PREFIX and "full-canvas" in warnings[0]
+    assert json.loads(body)["canvas_settings"]["aspect_ratio"] == "1:1, 1024 × 1024 px"
+    assert design.ming_caption("Logo with {curly} braces", 64, 64) == (
+        "Logo with {curly} braces", [])
+
+
 def test_plain_text_and_invalid_json_pass_through():
     assert design.ming_caption("A poster of a cat", 1024, 1024) == ("A poster of a cat", [])
     text, warnings = design.ming_caption("{not json", 1024, 1024)
@@ -68,8 +78,11 @@ def test_layers_prompt():
         "Number of layers: 2", 'Layer 1: Text "GO"', "Layer 2: Blue background"]
     assert design.layers_prompt(prompt) == (prompt, 2)  # a ready specification is kept
     assert design.layers_prompt(None, 3) == ("Decompose this image into 3 layers.", 3)
+    preset, n = design.layers_prompt()
+    assert n == 4 and "Layer 1 (text): All designed overlay text." in preset
+    assert design.PRESERVE in preset
     with pytest.raises(ValueError):
-        design.layers_prompt(None, None)
+        design.layers_prompt("Decompose this image into some layers")
 
 
 def _registry():
@@ -126,3 +139,55 @@ def test_contact_sheet():
     sheet = imaging.contact_sheet([("a", png("RGB", "red")), ("b", png("RGBA", (0, 0, 0, 0)))], 600)
     img = Image.open(io.BytesIO(sheet))
     assert img.format == "JPEG" and img.width <= 600
+
+
+def _png(img):
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_split_alpha_cuts_objects_and_keeps_labels_whole():
+    img = Image.new("RGBA", (1000, 600), (0, 0, 0, 0))
+    paint = lambda box: img.paste((200, 30, 30, 255), box)
+    paint((50, 50, 350, 150))      # button 1
+    paint((50, 162, 350, 262))     # button 2, 12 px below (not glued by the gap)
+    img.paste((255, 255, 255, 40), (50, 150, 350, 162))  # faint shadow between them
+    for x in (500, 530, 560, 610, 640):  # two "words" of 12 px letters on one line
+        paint((x, 400, x + 20, 418))
+    pieces = imaging.split_alpha(_png(img))
+    boxes = [b for b, _ in pieces]
+    assert len(pieces) == 3
+    assert boxes[0][:2] == (46, 46)  # reading order, 4 px padding
+    assert 150 <= boxes[1][1] + 4 <= 162  # separate, keeping part of the shadow as soft edge
+    assert boxes[2][0] == 496 and boxes[2][2] == 660 - 500 + 8  # the label is one asset
+    assert Image.open(io.BytesIO(pieces[0][1])).mode == "RGBA"
+    assert len(imaging.split_alpha(_png(img), whole=True)) == 1
+    assert imaging.split_alpha(_png(Image.new("RGB", (64, 64), "red"))) == []
+
+
+async def test_transparent_prefix_goes_first():
+    reg = _registry()
+    entry = load_manifest(REPO_WORKFLOWS).workflows["generate_ui_design"]
+    graph, applied, _ = await build_graph(
+        reg, entry, {"prompt": json.dumps(CAPTION), "transparent": True})
+    text = graph[resolve_node(graph, "[$PROMPT]")]["inputs"]["value"]
+    assert text.startswith(design.TRANSPARENT_PREFIX + "\n{")
+    assert json.loads(text.partition("\n")[2])["canvas_settings"]["aspect_ratio"].endswith("px")
+    assert entry.split_alpha["param"] == "transparent" and applied["transparent"] is True
+    # the full-canvas background layer would make Ming paint an opaque canvas
+    assert len(json.loads(text.partition("\n")[2])["layers"]) == 1
+    assert "full-canvas" in applied["prompt_warnings"][0]
+
+
+def test_whole_layers_by_number():
+    from dreamer_mcp.server import _is_whole
+    assert _is_whole("layer_03", [3]) and _is_whole("layer_03", ["layer_03"])
+    assert not _is_whole("layer_03", [1, 2]) and not _is_whole("layer_03", None)
+
+
+def test_transparent_fraction():
+    img = Image.new("RGBA", (10, 10), (0, 0, 0, 0))
+    img.paste((255, 0, 0, 255), (0, 0, 10, 5))
+    assert imaging.transparent_fraction(_png(img)) == 0.5
+    assert imaging.transparent_fraction(_png(Image.new("RGB", (4, 4)))) == 0.0

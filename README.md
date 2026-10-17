@@ -395,8 +395,10 @@ de `<image1>` e, por fim, os defaults.
 |---|---|---|
 | `choice` | tipo | Valida contra as opções do combo (lidas de `/object_info`); `"16:9"` casa com `"16:9 (Widescreen)"` |
 | `append_when` | param de texto | Acrescenta um texto fixo quando um param `bool` é true |
+| `prepend_when` | param de texto | Põe um texto fixo numa linha antes do valor quando um param `bool` é true (prefixos que o modelo espera no início) |
 | `remove_when_true` | param `bool` | Remove nós quando o valor é true |
 | `trim_alpha` | workflow | Devolve também cópias das saídas transparentes recortadas no objeto (`outputs` aceita curingas, ex.: `layer_*`) |
+| `split_alpha` | workflow | Corta saídas transparentes em um PNG por objeto, com `bbox`: `{outputs: ["layer_*"], param: split, gap: asset_gap, whole: whole_layers}` |
 | `batch_labels` | workflow | Um rótulo por arquivo de um lote, ex.: `{layers: {first: composite, each: "layer_{n:02d}"}}` |
 | `score` | workflow | Devolve também a partitura em PDF: do ABC passado em `param`, ou do texto ABC da saída `output` |
 | `transform` | param de texto | Reescreve o valor depois de aplicar todos os params, ex.: `{name: yue2_abc, lyrics: "[$LYRICS].value", mode: "8.mode"}` (os argumentos são lidos do grafo final); avisos voltam em `<param>_warnings` |
@@ -431,17 +433,36 @@ que diagrama a tela e renderiza o texto exato:
    descrição da tool. O MCP confere a legenda (chaves, coordenadas, caixas fora da tela, cores hex,
    texto repetido), avisa em `applied.prompt_warnings` e preenche `aspect_ratio` com o tamanho real
    (`"16:9, 1936 × 1088 px"`). Padrão: 2 MP; `aspect_ratio` `"9:19.5"` para celular, `"16:9"` para
-   desktop/TV.
+   desktop/TV. Com `transparent=true` o prompt começa com a frase fixa que o Ming conhece para RGBA
+   (`RGBA, 4-channel, transparent background`): sai um PNG transparente (ícone, botão, um conjunto
+   de ícones) e também um PNG por objeto (`design_asset_01`…). Liste só os objetos: uma camada de
+   fundo em tela cheia faz o modelo pintar um fundo opaco, então o MCP a remove. Nos testes o
+   alpha só sai em ~1 de cada 3 seeds; sem `seed` fixa, o MCP gera de novo com outra seed até
+   `attempts` vezes (padrão 4) e informa em `transparent_attempts`.
 2. **`comfyui_edit_ui_design`**: edita uma tela (`image`, inclusive um resultado anterior como
    `"dreamer-mcp/ui_design_00001_.png [output]"`). Para mover ou remover elementos, use uma
-   instrução curta citando os textos e dizendo o que fica no lugar antigo; com a legenda JSON
-   completa o modelo mantém uma cópia do elemento na posição original. Até 7 `references` (logo,
-   ícone, estilo).
-3. **`comfyui_decompose_ui`**: separa a tela em camadas RGBA com o checkpoint *Design-Layer*.
-   `layers` traz uma descrição por camada, da frente (Layer 1) para o fundo (última); o MCP monta o
-   pedido `Decompose this image into N layers...`. Volta `composite` (a tela recomposta),
-   `layer_01`… em tela cheia (empilham de volta no lugar) e `layer_01_trimmed`… recortadas no
-   conteúdo, prontas para reutilizar. A preview é uma folha de contato com todas as camadas.
+   instrução curta citando os textos, dizendo o que fica no lugar antigo e **nomeando os vizinhos
+   que ficam** (senão o modelo pode apagá-los também); com a legenda JSON completa o modelo mantém
+   uma cópia do elemento na posição original. Até 7 `references` (logo, ícone, estilo).
+3. **`comfyui_decompose_ui`**: separa a tela em camadas RGBA com o checkpoint *Design-Layer* e
+   corta cada camada em assets:
+   - `layers` traz uma descrição por camada, da frente (Layer 1) para o fundo (última); o MCP monta
+     o pedido `Decompose this image into N layers...`. Escreva esse plano olhando a imagem: ele
+     separa bem melhor. Sem `layers`, usa o pedido genérico de 4 camadas da skill `ling-ui-design`
+     (texto, imagens, containers e fundo), pensado para páginas web com fotos; em telas de jogo ou
+     app ele tende a misturar placas, rótulos e arte.
+   - Volta `composite` (a tela recomposta), `layer_01`… em tela cheia (empilham de volta no lugar)
+     e um PNG por objeto de cada camada, `layer_01_asset_01`…, com `bbox` (pixels da camada) e
+     `source_bbox` (pixels da imagem original). Um arquivo `manifest` (JSON) lista tudo.
+   - O corte usa regiões de alpha sólido (sombras fracas não colam vizinhos); as palavras de um
+     rótulo ficam juntas; `asset_gap` ajusta a distância de união e `whole_layers` mantém uma
+     camada inteira como um asset (logo, personagem).
+   - `region` `[x, y, w, h]` decompõe só um pedaço da imagem, na resolução de trabalho inteira:
+     serve para separar de novo um objeto que veio misturado, passando a própria camada como
+     `image`; o `source_bbox` continua apontando para a imagem passada. A última camada é sempre
+     o fundo opaco (a camada passada como `image` é achatada sobre branco), então termine esse
+     plano com "Plain white background" depois dos objetos a separar.
+   - As previews são folhas de contato das camadas e dos assets.
 
 Diferenças em relação aos fluxos de interface (`GENERATE_UI_DESIGN`, `EDIT_UI_DESIGN`, `DECOM_UI`):
 os subgraphs foram achatados à mão; no edit, a legenda vem de quem chama, em vez dos
