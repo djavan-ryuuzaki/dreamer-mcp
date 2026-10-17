@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import io
 
-from PIL import Image, ImageColor, UnidentifiedImageError
+from PIL import Image, ImageColor, ImageDraw, ImageFont, UnidentifiedImageError
 
 
 def open_image(data: bytes) -> Image.Image | None:
@@ -94,4 +94,46 @@ def trim_alpha(data: bytes, padding: int = 0, threshold: int = 8) -> bytes | Non
         return None
     buf = io.BytesIO()
     img.crop(box).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def on_checkerboard(img: Image.Image, cell: int = 16,
+                    colors: tuple[tuple[int, int, int], tuple[int, int, int]] = (
+                        (255, 255, 255), (204, 204, 204))) -> Image.Image:
+    """Show transparency the way image editors do, so it survives a JPEG preview."""
+    img = img.convert("RGBA")
+    board = Image.new("RGB", img.size, colors[0])
+    grey = Image.new("RGB", (cell, cell), colors[1])
+    for y in range(0, img.height, cell):
+        for x in range((y // cell) % 2 * cell, img.width, 2 * cell):
+            board.paste(grey, (x, y))
+    board.paste(img, (0, 0), img)
+    return board
+
+
+def contact_sheet(items: list[tuple[str, bytes]], max_size: int, columns: int = 4) -> bytes:
+    """One JPEG with every image (transparency on a checkerboard) and its label below it, so
+    a whole batch (e.g. decomposed layers) fits in a single preview. The checkerboard is dark,
+    so light content such as white text stays visible."""
+    images = [(label, img) for label, data in items if (img := open_image(data)) is not None]
+    if not images:
+        raise ValueError("no images")
+    columns = max(1, min(columns, len(images)))
+    rows = -(-len(images) // columns)
+    gap, caption = 8, 22
+    tile = max(64, (max_size - gap * (columns + 1)) // columns)
+    tile_h = max(32, round(tile * max(img.height / img.width for _, img in images)))
+    font = ImageFont.load_default(size=14)
+    sheet = Image.new("RGB", (columns * tile + gap * (columns + 1),
+                              rows * (tile_h + caption) + gap * (rows + 1)), (40, 40, 40))
+    draw = ImageDraw.Draw(sheet)
+    for i, (label, img) in enumerate(images):
+        img.thumbnail((tile, tile_h))
+        x = gap + (i % columns) * (tile + gap)
+        y = gap + (i // columns) * (tile_h + caption + gap)
+        board = on_checkerboard(img, cell=8, colors=((70, 70, 70), (100, 100, 100)))
+        sheet.paste(board, (x + (tile - img.width) // 2, y + (tile_h - img.height) // 2))
+        draw.text((x + 2, y + tile_h + 3), label, fill=(235, 235, 235), font=font)
+    buf = io.BytesIO()
+    sheet.save(buf, format="JPEG", quality=85)
     return buf.getvalue()

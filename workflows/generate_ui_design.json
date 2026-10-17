@@ -1,0 +1,197 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "ming_image_0.1_design_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "68": {
+    "class_type": "ModelAttentionBackend",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "attention": "comfy kitchen attention"
+    }
+  },
+  "42": {
+    "class_type": "ModelSamplingFlux",
+    "inputs": {
+      "model": [
+        "68",
+        0
+      ],
+      "max_shift": 1.15,
+      "base_shift": 0.5,
+      "width": [
+        "59",
+        0
+      ],
+      "height": [
+        "60",
+        0
+      ]
+    }
+  },
+  "23": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "ming_image_0.1_ling_mini_2.0_int8_convrot.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    }
+  },
+  "14": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "ming_image_vae_bf16.safetensors"
+    }
+  },
+  "21": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": [
+        "42",
+        0
+      ],
+      "scheduler": "simple",
+      "steps": 12,
+      "denoise": 1.0
+    }
+  },
+  "26": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 43
+    },
+    "_meta": {
+      "title": "[$SEED]"
+    }
+  },
+  "59": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 1440
+    },
+    "_meta": {
+      "title": "[$WIDTH]"
+    }
+  },
+  "60": {
+    "class_type": "PrimitiveInt",
+    "inputs": {
+      "value": 1440
+    },
+    "_meta": {
+      "title": "[$HEIGHT]"
+    }
+  },
+  "77": {
+    "class_type": "PrimitiveStringMultiline",
+    "inputs": {
+      "value": ""
+    },
+    "_meta": {
+      "title": "[$PROMPT]"
+    }
+  },
+  "3": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "26",
+        0
+      ],
+      "guider": [
+        "73",
+        0
+      ],
+      "sampler": [
+        "18",
+        0
+      ],
+      "sigmas": [
+        "21",
+        0
+      ],
+      "latent_image": [
+        "41",
+        0
+      ]
+    }
+  },
+  "15": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "3",
+        0
+      ],
+      "vae": [
+        "14",
+        0
+      ]
+    }
+  },
+  "40": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "23",
+        0
+      ],
+      "text": [
+        "77",
+        0
+      ]
+    }
+  },
+  "18": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler"
+    }
+  },
+  "73": {
+    "class_type": "BasicGuider",
+    "inputs": {
+      "model": [
+        "42",
+        0
+      ],
+      "conditioning": [
+        "40",
+        0
+      ]
+    }
+  },
+  "41": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": [
+        "59",
+        0
+      ],
+      "height": [
+        "60",
+        0
+      ],
+      "batch_size": 1
+    }
+  },
+  "90": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "15",
+        0
+      ],
+      "filename_prefix": "dreamer-mcp/ui_design"
+    },
+    "_meta": {
+      "title": "[$OUTPUT]"
+    }
+  }
+}

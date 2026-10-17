@@ -26,20 +26,21 @@ from typing import Any
 
 import yaml
 
-from . import abc, imaging
+from . import abc, design, imaging
 from .client import ComfyClient, ComfyUIError
 from .media import mime_type
 
 COMFYUI_PREFIX = "comfyui:"
 MANIFEST_NAMES = ("workflows.yaml", "workflows.yml")
 PRESET_KINDS = ("image", "asset", "upscale", "video", "audio", "music", "music_cover",
-                "song_abc")
+                "song_abc", "ui_design", "ui_edit", "ui_decompose")
 SEED_INPUTS = {"seed", "noise_seed"}
 MODEL_EXTS = (".safetensors", ".gguf", ".ckpt", ".pt", ".pth", ".bin", ".sft", ".onnx")
 MAX_SEED = 2**50
 TRANSFORMS: dict[str, Callable[..., tuple[str, list[str]]]] = {
     # value, **{name: input read from the graph} -> (new value, warnings)
     "yue2_abc": abc.for_yue2,
+    "ming_caption": design.ming_caption,
 }
 
 
@@ -134,6 +135,9 @@ class WorkflowEntry:
     """param name -> {"<node>.<input>": value} applied when that param is provided."""
     outputs: dict[str, str] = field(default_factory=dict)
     """label -> output node (id or title); the label is returned with each output file."""
+    batch_labels: dict[str, dict[str, str]] = field(default_factory=dict)
+    """output label -> {"first": "composite", "each": "layer_{n:02d}"}: label each file of a
+    batch on its own. `first` (optional) names the first file; `each` the others, n from 1."""
     size: dict[str, Any] = field(default_factory=dict)
     """How width/height are derived when the caller doesn't give them. Keys (all optional):
     width/height (param names, default "width"/"height"), aspect_ratio/megapixels (param names
@@ -182,6 +186,8 @@ def load_manifest(workflows_dir: Path) -> Manifest:
             when_missing=dict(spec.get("when_missing") or {}),
             when_set=dict(spec.get("when_set") or {}),
             outputs={str(k): str(v) for k, v in (spec.get("outputs") or {}).items()},
+            batch_labels={str(k): {str(a): str(b) for a, b in (v or {}).items()}
+                          for k, v in (spec.get("batch_labels") or {}).items()},
             size=dict(spec.get("size") or {}),
             trim_alpha=dict(spec.get("trim_alpha") or {}),
             score={str(k): str(v) for k, v in (spec.get("score") or {}).items()},
@@ -661,7 +667,10 @@ async def build_graph(
         applied[target] = value
 
     for label, ref in entry.outputs.items():
-        graph[resolve_node(graph, ref)].setdefault("_meta", {})["mcp_output"] = label
+        meta = graph[resolve_node(graph, ref)].setdefault("_meta", {})
+        meta["mcp_output"] = label
+        if label in entry.batch_labels:
+            meta["mcp_batch_labels"] = entry.batch_labels[label]
     if prune or remove:
         prune_nodes(graph, remove | {resolve_node(graph, t.rsplit(".", 1)[0]) for t in prune})
     if remove and entry.outputs and not any(
@@ -738,8 +747,17 @@ def prune_nodes(graph: dict, node_ids: set[str]) -> None:
 LinkFn = Callable[[str, str, str], dict[str, str]]
 
 
-def _output_label(graph: dict, node_id: str) -> str | None:
+def _output_label(graph: dict, node_id: str, index: int = 0) -> str | None:
     meta = (graph.get(node_id) or {}).get("_meta") or {}
+    batch = meta.get("mcp_batch_labels")
+    if isinstance(batch, dict) and batch.get("each"):
+        first = batch.get("first")
+        if first and index == 0:
+            return first
+        try:
+            return batch["each"].format(n=index if first else index + 1)
+        except (KeyError, IndexError, ValueError):
+            pass
     if meta.get("mcp_output"):
         return meta["mcp_output"]
     title = meta.get("title") or ""
@@ -752,13 +770,13 @@ def extract_outputs(entry: dict, links: LinkFn, include_temp: bool = False) -> l
     graph = prompt[2] if isinstance(prompt, list) and len(prompt) > 2 else None
     graph = graph if isinstance(graph, dict) else {}
     for node_id, node_out in (entry.get("outputs") or {}).items():
-        label = _output_label(graph, node_id)
         for kind, items in node_out.items():
             if not isinstance(items, list):
                 continue
-            for item in items:
+            for index, item in enumerate(items):
                 if not isinstance(item, dict) or "filename" not in item:
                     continue
+                label = _output_label(graph, node_id, index)
                 type_ = item.get("type", "output")
                 if type_ == "temp" and not include_temp:
                     continue

@@ -23,6 +23,9 @@ Kubernetes) apontando para o ComfyUI onde quer que ele esteja. O modo stdio tamb
   música de referência.
 - **Gerar ou editar no mesmo workflow:** sem imagens, gera; com 1 a 9 imagens de referência, edita.
   Os slots não usados são removidos do grafo automaticamente.
+- **Design de telas, banners e posters:** o Ming Image 0.1 Design gera telas de app/jogo/site com
+  texto exato a partir de uma legenda estilo Figma, edita (mover, trocar, remover elementos) e
+  decompõe a tela em camadas RGBA reutilizáveis.
 - **Assets transparentes:** PNG com canal alpha real, largura/altura exatas e cópias recortadas no
   objeto.
 - **Qualquer tamanho:** pixels exatos, qualquer proporção (`"16:9"`, `"5:4"`, `"1.5"`) com
@@ -56,6 +59,9 @@ Kubernetes) apontando para o ComfyUI onde quer que ele esteja. O modo stdio tamb
 | `comfyui_free_memory` | Descarrega modelos e libera VRAM |
 | `comfyui_generate_image` | Preset `image`: gera; com `images`, edita |
 | `comfyui_generate_asset` | Preset `asset`: PNG com fundo transparente |
+| `comfyui_generate_ui_design` | Preset `ui_design`: tela, banner, poster a partir de uma legenda estilo Figma (Ming Image) |
+| `comfyui_edit_ui_design` | Preset `ui_edit`: edita uma tela (mover, trocar, remover elementos), com até 7 referências |
+| `comfyui_decompose_ui` | Preset `ui_decompose`: separa a tela em camadas RGBA (assets reutilizáveis) |
 | `comfyui_upscale` | Preset `upscale` |
 | `comfyui_generate_video` | Preset `video` |
 | `comfyui_generate_audio` | Preset `audio` (genérico: prompt + letra + duração) |
@@ -117,6 +123,7 @@ estiverem faltando, atualize-o.
 | Pacote | Usado em | Nós |
 |---|---|---|
 | ComfyUI (core) | imagem/asset | `TextEncodeQwenImage21`, `ModelAttentionBackend` |
+| ComfyUI (core) | design | `TextEncodeMingImageEdit`, `EmptyQwenImageLayeredLatentImage`, `LatentCutToBatch`, `SamplerLCM` |
 | ComfyUI (core) | vídeo | `MiniMaxH3ReferenceToVideo`, `ComfyMathExpression`, `ComfySwitchNode`, `ResolutionSelector` |
 | ComfyUI (core) | áudio | `YuE2GenerateABC`, `YuE2GenerateMusic`, `EmptyYuE2LatentAudio`, `SheetSage2AudioToABC`, `AudioEncoderLoader`, `LoadAudio`, `SaveAudio`, `SaveText`, `PreviewAny` |
 | [ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use) | imagem/asset/áudio | `easy ifElse`, `easy cleanGpuUsed`, `easy clearCacheAll` |
@@ -133,6 +140,19 @@ Cada arquivo vai para `ComfyUI/models/<pasta>/`; subpastas também valem.
 | [`qwen_image_2.1_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors) | `diffusion_models` | 7,3 GB |
 | [`qwen3vl_8b_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors) | `text_encoders` | 9,4 GB |
 | [`qwen_image_2.1_vae_bf16.safetensors`](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors) | `vae` | 0,7 GB |
+
+**Design de telas** (`comfyui_generate_ui_design`, `comfyui_edit_ui_design`, `comfyui_decompose_ui`),
+Ming Image 0.1 Design + Design-Layer, ~52 GB:
+
+| Arquivo | Pasta | Tamanho |
+|---|---|---|
+| [`ming_image_0.1_design_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/Ming-Image/resolve/main/diffusion_models/ming_image_0.1_design_int8_convrot.safetensors) | `diffusion_models` | 6,2 GB |
+| [`ming_image_0.1_ling_mini_2.0_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/Ming-Image/resolve/main/text_encoders/ming_image_0.1_ling_mini_2.0_int8_convrot.safetensors) | `text_encoders` | 19,5 GB |
+| [`ming_image_0.1_design_layer_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/Ming-Image/resolve/main/diffusion_models/ming_image_0.1_design_layer_int8_convrot.safetensors) | `diffusion_models` | 6,2 GB |
+| [`ming_image_0.1_ling_mini_2.0_layer_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/Ming-Image/resolve/main/text_encoders/ming_image_0.1_ling_mini_2.0_layer_int8_convrot.safetensors) | `text_encoders` | 19,5 GB |
+| [`ming_image_vae_bf16.safetensors`](https://huggingface.co/Comfy-Org/Ming-Image/resolve/main/vae/ming_image_vae_bf16.safetensors) | `vae` | 0,25 GB |
+
+Os dois arquivos `_layer` só são usados na decomposição em camadas.
 
 **Vídeo com som** (`comfyui_generate_video`), MiniMax H3 reference-to-video, ~52 GB:
 
@@ -181,6 +201,9 @@ Os presets já vêm prontos, em [`workflows/`](workflows) (também embutidos no 
 |---|---|---|
 | `generate_image.json` | `image` | Qwen Image 2.1: gera ou edita (1 a 9 referências) + upscale |
 | `generate_asset.json` | `asset` | Qwen Image 2.1: PNG com fundo transparente + upscale |
+| `generate_ui_design.json` | `ui_design` | Ming Image 0.1 Design: tela/banner/poster a partir de legenda estilo Figma |
+| `edit_ui_design.json` | `ui_edit` | Ming Image 0.1 Design: edita uma tela, com até 7 imagens de referência |
+| `decompose_ui.json` | `ui_decompose` | Ming Image 0.1 Design-Layer: decompõe em N camadas RGBA |
 | `minimax_h3_r2v.json` | `video` | MiniMax H3: vídeo com som a partir de 2 imagens de referência |
 | `generate_music.json` | `audio`, `music` | YuE2: música com vocais a partir de estilo + letra, com partitura ABC opcional; devolve o áudio e o ABC usado (`.md`) |
 | `generate_cover_music.json` | `music_cover` | YuE2 + SheetSage2: cover (nova letra/estilo sobre a melodia de uma música) |
@@ -373,7 +396,8 @@ de `<image1>` e, por fim, os defaults.
 | `choice` | tipo | Valida contra as opções do combo (lidas de `/object_info`); `"16:9"` casa com `"16:9 (Widescreen)"` |
 | `append_when` | param de texto | Acrescenta um texto fixo quando um param `bool` é true |
 | `remove_when_true` | param `bool` | Remove nós quando o valor é true |
-| `trim_alpha` | workflow | Devolve também cópias das saídas transparentes recortadas no objeto |
+| `trim_alpha` | workflow | Devolve também cópias das saídas transparentes recortadas no objeto (`outputs` aceita curingas, ex.: `layer_*`) |
+| `batch_labels` | workflow | Um rótulo por arquivo de um lote, ex.: `{layers: {first: composite, each: "layer_{n:02d}"}}` |
 | `score` | workflow | Devolve também a partitura em PDF: do ABC passado em `param`, ou do texto ABC da saída `output` |
 | `transform` | param de texto | Reescreve o valor depois de aplicar todos os params, ex.: `{name: yue2_abc, lyrics: "[$LYRICS].value", mode: "8.mode"}` (os argumentos são lidos do grafo final); avisos voltam em `<param>_warnings` |
 
@@ -394,6 +418,35 @@ objeto.
 - `trim` (ligado por padrão) devolve também `base_trimmed`/`upscale_trimmed`, recortados no objeto
   com margem, salvos ao lado dos originais.
 - As previews mostram a transparência sobre um xadrez.
+
+## Design de telas, banners e posters
+
+Três presets com o [Ming Image 0.1 Design](https://huggingface.co/inclusionAI/Ming-Image-0.1-Design),
+que diagrama a tela e renderiza o texto exato:
+
+1. **`comfyui_generate_ui_design`**: o assistente expande o pedido ("uma tela de menu de um jogo")
+   numa legenda estilo Figma em JSON: `canvas_settings` e `layers` do fundo para a frente, cada uma
+   com `description`, `coordinates` (`"cx: 0.500, cy: 0.500, w: 1.000, h: 1.000"`),
+   `hierarchy_and_relation` e `color_specs`. As regras do *rewriter* oficial do Ming estão na
+   descrição da tool. O MCP confere a legenda (chaves, coordenadas, caixas fora da tela, cores hex,
+   texto repetido), avisa em `applied.prompt_warnings` e preenche `aspect_ratio` com o tamanho real
+   (`"16:9, 1936 × 1088 px"`). Padrão: 2 MP; `aspect_ratio` `"9:19.5"` para celular, `"16:9"` para
+   desktop/TV.
+2. **`comfyui_edit_ui_design`**: edita uma tela (`image`, inclusive um resultado anterior como
+   `"dreamer-mcp/ui_design_00001_.png [output]"`). Para mover ou remover elementos, use uma
+   instrução curta citando os textos e dizendo o que fica no lugar antigo; com a legenda JSON
+   completa o modelo mantém uma cópia do elemento na posição original. Até 7 `references` (logo,
+   ícone, estilo).
+3. **`comfyui_decompose_ui`**: separa a tela em camadas RGBA com o checkpoint *Design-Layer*.
+   `layers` traz uma descrição por camada, da frente (Layer 1) para o fundo (última); o MCP monta o
+   pedido `Decompose this image into N layers...`. Volta `composite` (a tela recomposta),
+   `layer_01`… em tela cheia (empilham de volta no lugar) e `layer_01_trimmed`… recortadas no
+   conteúdo, prontas para reutilizar. A preview é uma folha de contato com todas as camadas.
+
+Diferenças em relação aos fluxos de interface (`GENERATE_UI_DESIGN`, `EDIT_UI_DESIGN`, `DECOM_UI`):
+os subgraphs foram achatados à mão; no edit, a legenda vem de quem chama, em vez dos
+`CreateBoundingBoxes`; no `DECOM_UI` a imagem não chegava ao text encoder (só dava o tamanho) e o
+fluxo usava os checkpoints de geração em vez dos `_layer`.
 
 ## Vídeo, áudio e imagens: streaming
 
