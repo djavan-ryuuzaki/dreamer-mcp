@@ -157,7 +157,7 @@ def contact_sheet(items: list[tuple[str, bytes]], max_size: int, columns: int = 
 
 
 def split_alpha(data: bytes, padding: int = 4, gap: float = 0.004, whole: bool = False,
-                threshold: int = 8, core: int = 128, min_area: float = 0.0004,
+                keep_full: bool = False, threshold: int = 8, core: int = 128, min_area: float = 0.0004,
                 max_items: int = 32) -> list[tuple[tuple[int, int, int, int], bytes]]:
     """Cut a transparent layer into one PNG per object. Objects are connected regions of solid
     alpha (> `core`, so faint shadows or glows don't glue neighbors together) closer than
@@ -166,7 +166,8 @@ def split_alpha(data: bytes, padding: int = 4, gap: float = 0.004, whole: bool =
     a character). Pieces keep their soft edges (alpha > `threshold`) plus `padding`.
     Returns [((x, y, w, h), png)] in reading order; empty for opaque images. Regions under
     `min_area` (fraction of the canvas) are noise, and one covering almost the whole canvas
-    is a background, not an asset."""
+    is a background, not an asset, unless `keep_full` (a front layer of a decomposed region
+    that is the object itself)."""
     img = open_image(data)
     if img is None or not has_alpha(img):
         return []
@@ -214,7 +215,7 @@ def split_alpha(data: bytes, padding: int = 4, gap: float = 0.004, whole: bool =
         x0, y0 = max(0, box[0] + tight[0] - padding), max(0, box[1] + tight[1] - padding)
         x1 = min(width, box[0] + tight[2] + padding)
         y1 = min(height, box[1] + tight[3] + padding)
-        if not whole and (x1 - x0) * (y1 - y0) >= 0.9 * width * height:
+        if not (whole or keep_full) and (x1 - x0) * (y1 - y0) >= 0.9 * width * height:
             continue
         piece = img.crop((x0, y0, x1, y1))
         keep = own.crop((x0 - box[0], y0 - box[1], x1 - box[0], y1 - box[1]))
