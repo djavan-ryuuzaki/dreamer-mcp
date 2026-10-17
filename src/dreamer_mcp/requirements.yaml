@@ -40,6 +40,39 @@ groups:
         size_gb: 0.7
         url: https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors
 
+  design:
+    title: UI design (comfyui_generate_ui_design, comfyui_edit_ui_design, comfyui_decompose_ui) - Ming Image 0.1 Design
+    workflows: [api/generate_ui_design.json, api/edit_ui_design.json, api/decompose_ui.json]
+    nodes:
+      - package: ComfyUI
+        classes: [TextEncodeMingImageEdit, EmptyQwenImageLayeredLatentImage, LatentCutToBatch,
+                  SamplerLCM, ModelAttentionBackend, PrimitiveStringMultiline, PrimitiveInt]
+    models:
+      - file: ming_image_0.1_design_int8_convrot.safetensors
+        folder: diffusion_models
+        size_gb: 6.2
+        url: https://huggingface.co/Comfy-Org/Ming-Image/resolve/main/diffusion_models/ming_image_0.1_design_int8_convrot.safetensors
+        note: Generate and edit
+      - file: ming_image_0.1_ling_mini_2.0_int8_convrot.safetensors
+        folder: text_encoders
+        size_gb: 19.5
+        url: https://huggingface.co/Comfy-Org/Ming-Image/resolve/main/text_encoders/ming_image_0.1_ling_mini_2.0_int8_convrot.safetensors
+        note: Generate and edit
+      - file: ming_image_0.1_design_layer_int8_convrot.safetensors
+        folder: diffusion_models
+        size_gb: 6.2
+        url: https://huggingface.co/Comfy-Org/Ming-Image/resolve/main/diffusion_models/ming_image_0.1_design_layer_int8_convrot.safetensors
+        note: Layer decomposition
+      - file: ming_image_0.1_ling_mini_2.0_layer_int8_convrot.safetensors
+        folder: text_encoders
+        size_gb: 19.5
+        url: https://huggingface.co/Comfy-Org/Ming-Image/resolve/main/text_encoders/ming_image_0.1_ling_mini_2.0_layer_int8_convrot.safetensors
+        note: Layer decomposition
+      - file: ming_image_vae_bf16.safetensors
+        folder: vae
+        size_gb: 0.25
+        url: https://huggingface.co/Comfy-Org/Ming-Image/resolve/main/vae/ming_image_vae_bf16.safetensors
+
   video:
     title: Video with sound (comfyui_generate_video) - MiniMax H3 reference-to-video
     workflows: [api/minimax_h3_r2v.json]

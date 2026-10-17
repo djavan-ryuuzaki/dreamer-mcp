@@ -27,6 +27,9 @@ presets:
   music: generate_music
   music_cover: generate_cover_music
   song_abc: generate_song_abc
+  ui_design: generate_ui_design
+  ui_edit: edit_ui_design
+  ui_decompose: decompose_ui
 
 workflows:
   generate_image:
@@ -123,6 +126,99 @@ workflows:
     when_set:
       width: {"[$MANTER_RESOLUCAO].value": false}
       height: {"[$MANTER_RESOLUCAO].value": false}
+
+  generate_ui_design:
+    # From the UI workflow GENERATE_UI_DESIGN.json (its "Text to Image (Ming Image 0.1 Design)"
+    # subgraph, flattened by hand). The prompt is a Figma-style JSON caption (see
+    # comfyui_generate_ui_design); the ming_caption transform checks it and writes the real
+    # width/height into canvas_settings.aspect_ratio.
+    file: "comfyui:api/generate_ui_design.json"
+    fallback: generate_ui_design.json
+    description: Ming Image 0.1 Design - UI screens, banners, posters from a Figma-style JSON caption (renders exact text)
+    outputs:
+      design: "[$OUTPUT]"
+    size:
+      aspect_ratio: aspect_ratio
+      megapixels: megapixels
+      default_megapixels: 2.0    # the model is trained up to 2048x2048
+    params:
+      prompt:
+        target: "[$PROMPT].value"
+        type: string
+        description: "Figma-style JSON caption (canvas_settings + layers) or plain text"
+        transform: {name: ming_caption, width: "[$WIDTH].value", height: "[$HEIGHT].value"}
+      width:        {target: "[$WIDTH].value", type: int, default: 1440, multiple_of: 16, description: "Pixels (overrides aspect_ratio/megapixels)"}
+      height:       {target: "[$HEIGHT].value", type: int, default: 1440, multiple_of: 16}
+      aspect_ratio: {type: string, description: "e.g. 16:9, 9:19.5 (phone), 3:4, 1:1; converted to width/height"}
+      megapixels:   {type: float, description: "Image area, 1.0 = ~1024x1024 (default 2.0)"}
+      steps:        {target: "21.steps", type: int, description: "Sampling steps (default 12)"}
+      seed:         {target: "[$SEED].noise_seed", type: seed}
+
+  edit_ui_design:
+    # From the UI workflow EDIT_UI_DESIGN.json ("Image Edit (Ming Image 0.1 Design)" subgraph).
+    # There the caption is built from boxes drawn in CreateBoundingBoxes; here the caller writes
+    # the Figma-style caption of the edited design itself. <image1> is resized to
+    # [$WIDTH]x[$HEIGHT] because the sampled latent must match its size; up to 7 more images are
+    # references (a logo, an icon, a style...).
+    file: "comfyui:api/edit_ui_design.json"
+    fallback: edit_ui_design.json
+    description: Ming Image 0.1 Design - edit a UI screen/banner/poster (<image1>) to match a Figma-style JSON caption of the result; up to 7 reference images
+    outputs:
+      design: "[$OUTPUT]"
+    size:
+      from_image: images         # without width/height: the size of <image1>
+      max_side: 2048
+    params:
+      prompt:
+        target: "[$PROMPT].value"
+        type: string
+        description: "Figma-style JSON caption of the edited design (or plain text)"
+        transform: {name: ming_caption, width: "[$WIDTH].value", height: "[$HEIGHT].value"}
+      images:
+        target: ["[$IMAGEM_0].image", "[$IMAGEM_1].image", "[$IMAGEM_2].image", "[$IMAGEM_3].image", "[$IMAGEM_4].image", "[$IMAGEM_5].image", "[$IMAGEM_6].image", "[$IMAGEM_7].image"]
+        type: file_list
+        prune_missing: true
+        description: "<image1> = the design to edit, then 0-7 reference images (URL, base64 or ComfyUI filename)"
+      width:  {target: "[$WIDTH].value", type: int, default: 1024, multiple_of: 16, description: "Pixels; defaults to the size of <image1>"}
+      height: {target: "[$HEIGHT].value", type: int, default: 1024, multiple_of: 16}
+      steps:  {target: "21.steps", type: int, description: "Sampling steps (default 12)"}
+      seed:   {target: "[$SEED].noise_seed", type: seed}
+
+  decompose_ui:
+    # From the UI workflow DECOM_UI.json, with two fixes: it uses the layer-decomposition
+    # checkpoints (ming_image_0.1_design_layer + ling_mini_2.0_layer), and <image1> is also fed
+    # to the text encoder (DECOM_UI only read its size). The model returns one composite image
+    # followed by the N layers (RGBA, front-most first).
+    file: "comfyui:api/decompose_ui.json"
+    fallback: decompose_ui.json
+    description: Ming Image 0.1 Design-Layer - decompose a flattened design into N transparent RGBA layers (reusable assets)
+    outputs:
+      layers: "[$OUTPUT]"
+    batch_labels:
+      layers: {first: composite, each: "layer_{n:02d}"}
+    size:
+      from_image: images
+      megapixels: megapixels     # the model works at ~1 MP (1024 bucket), keeping the ratio
+      default_megapixels: 1.0
+      max_side: 1024
+    trim_alpha:                  # also return each layer cropped to its content
+      outputs: ["layer_*"]
+      padding: 8
+      param: trim
+    params:
+      prompt:     {target: "[$PROMPT].value", type: string, description: "\"Decompose this image into N layers...\" specification"}
+      images:
+        target: ["[$IMAGEM_0].image"]
+        type: file_list
+        description: The flattened design (URL, base64 or ComfyUI filename)
+      num_layers: {target: "[$LAYERS].layers", type: int, description: "Number of layers (must match the prompt)"}
+      megapixels: {type: float, description: "Working area, 1.0 = ~1024x1024 (default); 0.25 is faster"}
+      width:      {target: "[$WIDTH].value", type: int, default: 1024, multiple_of: 16}
+      height:     {target: "[$HEIGHT].value", type: int, default: 1024, multiple_of: 16}
+      trim:       {type: bool, default: true, description: "Also return each layer cropped to its content"}
+      steps:      {target: "21.steps", type: int, description: "Sampling steps (default 12)"}
+      cfg:        {target: "73.cfg", type: float, description: "CFG (default 2.0)"}
+      seed:       {target: "[$SEED].noise_seed", type: seed}
 
   qwen_image:
     # Saved from ComfyUI history with comfyui_save_workflow. Ids like "459:452" are nodes inside a subgraph.

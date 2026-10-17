@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import functools
 import io
 import re
@@ -19,7 +20,7 @@ from PIL import Image as PILImage
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 
-from . import __version__, abc, imaging, requirements, score
+from . import __version__, abc, design, imaging, requirements, score
 from .client import ComfyClient, ComfyUIError
 from .config import get_settings
 from .convert import convert_ui_to_api
@@ -45,6 +46,8 @@ Typical flow: comfyui_workflows -> comfyui_workflow_info (see params/inputs) -> 
 (wait=false returns a prompt_id) -> comfyui_job_status -> comfyui_get_output / comfyui_view_image.
 For everyday tasks prefer the presets: comfyui_generate_image, comfyui_generate_asset, comfyui_upscale,
 comfyui_generate_video, comfyui_generate_music (songs, covers), comfyui_song_to_abc.
+UI screens, banners and posters (exact text and layout): comfyui_generate_ui_design ->
+comfyui_edit_ui_design -> comfyui_decompose_ui (split into reusable transparent layers).
 Generations can take minutes: for video/audio prefer wait=false and poll comfyui_job_status.
 If a preset fails because a node or model is missing, comfyui_requirements lists what to install.
 """
@@ -145,22 +148,11 @@ def _thumbnail(data: bytes, max_size: int) -> Image:
     img.seek(0)
     img.thumbnail((max_size, max_size))
     if img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info:
-        img = _on_checkerboard(img.convert("RGBA"))
+        img = imaging.on_checkerboard(img)
     img = img.convert("RGB")
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=85)
     return Image(data=buf.getvalue(), format="jpeg")
-
-
-def _on_checkerboard(img: PILImage.Image, cell: int = 16) -> PILImage.Image:
-    """Show transparency the way image editors do, so it survives the JPEG preview."""
-    board = PILImage.new("RGB", img.size, (255, 255, 255))
-    grey = PILImage.new("RGB", (cell, cell), (204, 204, 204))
-    for y in range(0, img.height, cell):
-        for x in range((y // cell) % 2 * cell, img.width, 2 * cell):
-            board.paste(grey, (x, y))
-    board.paste(img, (0, 0), img)
-    return board
 
 
 def _is_image(filename: str) -> bool:
@@ -433,7 +425,9 @@ async def _trim_outputs(entry: WorkflowEntry, applied: dict[str, Any],
     labels = cfg.get("outputs")
     c, trimmed = client(), []
     for out in outputs:
-        if not _is_image(out["filename"]) or (labels and out.get("label") not in labels):
+        label = out.get("label") or ""
+        if not _is_image(out["filename"]) or (
+                labels and not any(fnmatch.fnmatchcase(label, pat) for pat in labels)):
             continue
         data = imaging.trim_alpha((await c.view(out["filename"], out["subfolder"], out["type"])).content,
                                   padding=int(cfg.get("padding", 0)))
@@ -902,6 +896,160 @@ async def comfyui_generate_asset(
          "transparent": transparent, "upscale": upscale, "trim": trim, "seed": seed},
         extra, wait=wait, timeout=timeout, preview=preview, ctx=ctx,
     )
+
+
+def _with_guide(guide: str):
+    """Append a prompt-writing guide to the tool description (a docstring cannot be an
+    expression)."""
+
+    def wrap(fn):
+        fn.__doc__ = (fn.__doc__ or "").rstrip() + "\n\n" + guide
+        return fn
+
+    return wrap
+
+
+def _caption(caption: dict[str, Any] | str) -> str:
+    text = design.caption_text(caption)
+    if not text.strip():
+        raise ToolError("`caption` is empty.")
+    return text
+
+
+@mcp.tool(structured_output=False)
+@_with_guide(design.CAPTION_GUIDE)
+@tool_errors
+async def comfyui_generate_ui_design(
+    caption: dict[str, Any] | str,
+    width: int | None = None,
+    height: int | None = None,
+    aspect_ratio: str | None = None,
+    megapixels: float | None = None,
+    seed: int | None = None,
+    steps: int | None = None,
+    extra: dict[str, Any] | None = None,
+    workflow: str | None = None,
+    wait: bool = True,
+    timeout: int | None = None,
+    preview: bool = True,
+    ctx: Context | None = None,
+) -> list[Any]:
+    """Design a UI screen (app, game menu/HUD, website, dashboard), banner, poster, slide, card
+    or ad with Ming Image 0.1 Design (preset "ui_design"), which lays out and renders exact text.
+    Expand the user's request yourself into `caption`: a Figma-style JSON object (rules below;
+    plain text also works, with less control). Returns the image (label "design").
+    Size: width/height in pixels, or aspect_ratio ("16:9" desktop/TV, "9:19.5" phone, "3:4",
+    "1:1") and/or megapixels (default 2.0, the model's limit is ~2048 px per side).
+    `applied.prompt` is the caption that was used (with the real aspect_ratio): keep it, and
+    change it to edit the design with comfyui_edit_ui_design.
+
+    `extra` sets more workflow params or raw "<node>.<input>" overrides; `workflow` swaps the
+    preset for another workflow."""
+    return await _run_preset(
+        "ui_design", workflow,
+        {"prompt": _caption(caption), "width": width, "height": height,
+         "aspect_ratio": aspect_ratio, "megapixels": megapixels, "seed": seed, "steps": steps},
+        extra, wait=wait, timeout=timeout, preview=preview, ctx=ctx,
+    )
+
+
+@mcp.tool(structured_output=False)
+@tool_errors
+async def comfyui_edit_ui_design(
+    image: str,
+    caption: dict[str, Any] | str,
+    references: list[str] | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    seed: int | None = None,
+    steps: int | None = None,
+    extra: dict[str, Any] | None = None,
+    workflow: str | None = None,
+    wait: bool = True,
+    timeout: int | None = None,
+    preview: bool = True,
+    ctx: Context | None = None,
+) -> list[Any]:
+    """Edit a UI screen, banner or poster with Ming Image 0.1 Design (preset "ui_edit"): move,
+    add, remove or restyle elements, change texts, colors or the theme. `image` is the design
+    (<image1>: URL, base64, ComfyUI input filename, or "<subfolder>/<name> [output]" for a
+    previous result); `references` are up to 7 more images (logo, icon, style), <image2>...
+    `caption` says what to change, in either form:
+    - A short instruction in English (recommended; required to move or remove elements): name
+      each element by its visible text, say where it goes and what is left in its old place,
+      and end with "Keep everything else exactly the same.", e.g. 'Move the "QUIT" button out
+      of the left menu column to the bottom-right corner, keeping its style. Remove it from
+      its old place: the column now ends with the "CREDITS" button and the area below it
+      shows only the background. Keep everything else exactly the same.'
+    - The full Figma-style JSON caption of the result (same rules as
+      comfyui_generate_ui_design), to restyle or re-render the whole design. The model keeps
+      what it sees in <image1>, so with a caption a moved element stays in its old place too.
+    The size defaults to that of <image1> (max 2048 px per side). Returns label "design".
+
+    `extra` sets more workflow params or raw "<node>.<input>" overrides; `workflow` swaps the
+    preset for another workflow."""
+    return await _run_preset(
+        "ui_edit", workflow,
+        {"prompt": _caption(caption), "images": [image, *(references or [])],
+         "width": width, "height": height, "seed": seed, "steps": steps},
+        extra, wait=wait, timeout=timeout, preview=preview, ctx=ctx,
+    )
+
+
+@mcp.tool(structured_output=False)
+@_with_guide(design.LAYERS_GUIDE)
+@tool_errors
+async def comfyui_decompose_ui(
+    image: str,
+    layers: list[str] | None = None,
+    num_layers: int | None = None,
+    megapixels: float = 1.0,
+    trim: bool = True,
+    seed: int | None = None,
+    steps: int | None = None,
+    extra: dict[str, Any] | None = None,
+    workflow: str | None = None,
+    timeout: int | None = None,
+    preview: bool = True,
+    ctx: Context | None = None,
+) -> list[Any]:
+    """Split a flattened design (UI screen, banner, poster) into transparent RGBA layers - e.g.
+    to reuse its buttons, logo, character and background as assets - with Ming Image 0.1
+    Design-Layer (preset "ui_decompose"). `image`: URL, base64, ComfyUI input filename, or
+    "<subfolder>/<name> [output]" for a previous result.
+    `layers`: one description per layer, FRONT-most first, background last (how to write them
+    below); or only `num_layers` to let the model choose. More layers = more VRAM and time.
+    Returns "composite" (the recomposed full image), then "layer_01" (front-most) ...
+    "layer_NN" (background), each full-canvas so they stack back in place, plus (`trim`,
+    default on) "layer_01_trimmed"... cropped to their content, ready to use as assets.
+    `megapixels` is the working area (1.0 recommended, 0.25 is faster); the image keeps its
+    aspect ratio. The preview shows every layer in one contact sheet.
+
+    `extra` sets more workflow params or raw "<node>.<input>" overrides; `workflow` swaps the
+    preset for another workflow."""
+    try:
+        prompt, count = design.layers_prompt(layers, num_layers)
+    except ValueError as e:
+        raise ToolError(str(e)) from e
+    content = await _run_preset(
+        "ui_decompose", workflow,
+        {"prompt": prompt, "num_layers": count, "images": [image], "megapixels": megapixels,
+         "trim": trim, "seed": seed, "steps": steps},
+        extra, wait=True, timeout=timeout, preview=False, ctx=ctx,
+    )
+    result = content[0]
+    if preview and result.get("status") == "success":
+        full = [o for o in result.get("outputs", [])
+                if _is_image(o["filename"]) and not str(o.get("label", "")).endswith("_trimmed")]
+        c = client()
+        items = [(o.get("label") or o["filename"],
+                  (await c.view(o["filename"], o["subfolder"], o["type"])).content) for o in full]
+        try:
+            sheet = imaging.contact_sheet(items, max(get_settings().preview_max_size, 1024))
+            content.append(Image(data=sheet, format="jpeg"))
+        except ValueError:
+            pass
+    return content
 
 
 @mcp.tool(structured_output=False)
