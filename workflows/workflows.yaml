@@ -134,19 +134,29 @@ workflows:
     # width/height into canvas_settings.aspect_ratio.
     file: "comfyui:api/generate_ui_design.json"
     fallback: generate_ui_design.json
-    description: Ming Image 0.1 Design - UI screens, banners, posters from a Figma-style JSON caption (renders exact text)
+    description: Ming Image 0.1 Design - UI screens, banners, posters from a Figma-style JSON caption (renders exact text); transparent=true for loose assets
     outputs:
       design: "[$OUTPUT]"
     size:
       aspect_ratio: aspect_ratio
       megapixels: megapixels
       default_megapixels: 2.0    # the model is trained up to 2048x2048
+    split_alpha:                 # transparent designs (an icon set...) also come cut per object
+      outputs: [design]
+      param: transparent
+      gap: asset_gap
+      padding: 4
     params:
       prompt:
         target: "[$PROMPT].value"
         type: string
         description: "Figma-style JSON caption (canvas_settings + layers) or plain text"
+        # One of the fixed phrases Ming was trained on for RGBA output; it must come first.
+        prepend_when:
+          transparent: "RGBA, 4-channel, transparent background"
         transform: {name: ming_caption, width: "[$WIDTH].value", height: "[$HEIGHT].value"}
+      transparent:  {type: bool, default: false, description: "Transparent background (RGBA PNG), e.g. for icons, buttons or a sprite sheet; also returns one PNG per object"}
+      asset_gap:    {type: float, description: "Objects closer than this fraction of the longest side are one asset (default 0.004)"}
       width:        {target: "[$WIDTH].value", type: int, default: 1440, multiple_of: 16, description: "Pixels (overrides aspect_ratio/megapixels)"}
       height:       {target: "[$HEIGHT].value", type: int, default: 1440, multiple_of: 16}
       aspect_ratio: {type: string, description: "e.g. 16:9, 9:19.5 (phone), 3:4, 1:1; converted to width/height"}
@@ -205,17 +215,27 @@ workflows:
       outputs: ["layer_*"]
       padding: 8
       param: trim
+    split_alpha:                 # and one PNG per object of each layer, with its bbox
+      outputs: ["layer_*"]
+      padding: 4
+      param: split
+      gap: asset_gap
+      whole: whole_layers
     params:
       prompt:     {target: "[$PROMPT].value", type: string, description: "\"Decompose this image into N layers...\" specification"}
       images:
         target: ["[$IMAGEM_0].image"]
         type: file_list
+        flatten_alpha: "#ffffff"   # e.g. re-decomposing a layer: LoadImage drops alpha
         description: The flattened design (URL, base64 or ComfyUI filename)
       num_layers: {target: "[$LAYERS].layers", type: int, description: "Number of layers (must match the prompt)"}
       megapixels: {type: float, description: "Working area, 1.0 = ~1024x1024 (default); 0.25 is faster"}
       width:      {target: "[$WIDTH].value", type: int, default: 1024, multiple_of: 16}
       height:     {target: "[$HEIGHT].value", type: int, default: 1024, multiple_of: 16}
-      trim:       {type: bool, default: true, description: "Also return each layer cropped to its content"}
+      trim:       {type: bool, default: false, description: "Also return each layer cropped to its content"}
+      split:      {type: bool, default: true, description: "Also return one PNG per object of each layer, with its bbox"}
+      asset_gap:  {type: float, description: "Objects closer than this fraction of the longest side are one asset (default 0.004)"}
+      whole_layers: {description: "Layer numbers kept as one asset (a logo, a character)"}
       steps:      {target: "21.steps", type: int, description: "Sampling steps (default 12)"}
       cfg:        {target: "73.cfg", type: float, description: "CFG (default 2.0)"}
       seed:       {target: "[$SEED].noise_seed", type: seed}
