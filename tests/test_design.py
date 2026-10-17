@@ -166,6 +166,13 @@ def test_split_alpha_cuts_objects_and_keeps_labels_whole():
     assert imaging.split_alpha(_png(Image.new("RGB", (64, 64), "red"))) == []
 
 
+def test_split_alpha_keep_full_keeps_canvas_filling_object():
+    img = Image.new("RGBA", (400, 200), (0, 0, 0, 0))
+    img.paste((30, 200, 60, 255), (2, 2, 398, 198))  # a button plate filling a tight region
+    assert imaging.split_alpha(_png(img)) == []
+    assert len(imaging.split_alpha(_png(img), keep_full=True)) == 1
+
+
 async def test_transparent_prefix_goes_first():
     reg = _registry()
     entry = load_manifest(REPO_WORKFLOWS).workflows["generate_ui_design"]

@@ -470,14 +470,17 @@ async def _split_outputs(entry: WorkflowEntry, applied: dict[str, Any],
         return []
     gap = applied.get(cfg.get("gap", ""))
     whole = applied.get(cfg.get("whole", ""))
+    targets = [o for o in outputs if _is_image(o["filename"])
+               and _label_matches(o.get("label") or "", cfg.get("outputs"))]
     c, pieces = client(), []
-    for out in outputs:
+    for out in targets:
         label = out.get("label") or ""
-        if not _is_image(out["filename"]) or not _label_matches(label, cfg.get("outputs")):
-            continue
         data = (await c.view(out["filename"], out["subfolder"], out["type"])).content
         canvas = PILImage.open(io.BytesIO(data)).size
-        kwargs = {"padding": int(cfg.get("padding", 4)), "whole": _is_whole(label, whole)}
+        # Only the last output (the background layer) may hold a full-canvas background; a
+        # front layer that fills the canvas is the object of a tight `region`.
+        kwargs = {"padding": int(cfg.get("padding", 4)), "whole": _is_whole(label, whole),
+                  "keep_full": out is not targets[-1]}
         if gap is not None:
             kwargs["gap"] = float(gap)
         stem = PurePosixPath(out["filename"]).stem.rstrip("_")
