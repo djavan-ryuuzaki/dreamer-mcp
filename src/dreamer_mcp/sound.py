@@ -105,7 +105,8 @@ def convert(data: bytes, fmt: str) -> bytes:
     import soundfile  # numpy + libsndfile: imported only when a conversion is asked for
 
     container, subtype = CONVERTED_FORMATS[fmt]
-    samples, rate = soundfile.read(io.BytesIO(data), always_2d=True)
+    # int16: the targets are 16-bit (or lossy), and 380 s of stereo float64 would take ~270 MB
+    samples, rate = soundfile.read(io.BytesIO(data), dtype="int16", always_2d=True)
     out = io.BytesIO()
     soundfile.write(out, samples, rate, format=container, subtype=subtype)
     return out.getvalue()
