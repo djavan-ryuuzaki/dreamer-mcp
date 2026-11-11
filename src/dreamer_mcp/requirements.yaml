@@ -122,3 +122,19 @@ groups:
         size_gb: 1.4
         url: https://huggingface.co/Comfy-Org/YuE2/resolve/main/audio_encoders/sheetsage2_bf16.safetensors
         note: Covers and comfyui_song_to_abc (audio -> ABC transcription)
+
+  sound:
+    title: Instrumental music, instruments/loops, SFX and one-shots (comfyui_generate_sound) - Stable Audio 3 Medium
+    workflows: [api/generate_sound.json]
+    nodes:
+      - package: ComfyUI
+        classes: [EmptyLatentAudio, VAEDecodeAudio, SaveAudioAdvanced]
+    models:
+      - file: stable_audio_3_medium.safetensors
+        folder: checkpoints
+        size_gb: 8.6
+        url: https://huggingface.co/Comfy-Org/stable-audio-3/resolve/main/checkpoints/stable_audio_3_medium.safetensors
+      - file: t5gemma_b_b_ul2.safetensors
+        folder: text_encoders
+        size_gb: 1.1
+        url: https://huggingface.co/Comfy-Org/stable-audio-3/resolve/main/text_encoders/t5gemma_b_b_ul2.safetensors

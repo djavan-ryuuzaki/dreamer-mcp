@@ -1,0 +1,118 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "stable_audio_3_medium.safetensors"
+    },
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "2": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "t5gemma_b_b_ul2.safetensors",
+      "type": "stable_audio",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "Load Text Encoder"
+    }
+  },
+  "3": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "2",
+        0
+      ],
+      "text": "TrackType: SFX, Glass bottle shattering on concrete, sharp impact, scattered fragments, close-mic, dry room. Length: 3 seconds"
+    },
+    "_meta": {
+      "title": "[$PROMPT]"
+    }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "2",
+        0
+      ],
+      "text": ""
+    },
+    "_meta": {
+      "title": "Negative (empty)"
+    }
+  },
+  "5": {
+    "class_type": "EmptyLatentAudio",
+    "inputs": {
+      "seconds": 3,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "[$DURATION]"
+    }
+  },
+  "6": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "3",
+        0
+      ],
+      "negative": [
+        "4",
+        0
+      ],
+      "latent_image": [
+        "5",
+        0
+      ],
+      "seed": 42,
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "lcm",
+      "scheduler": "simple",
+      "denoise": 1
+    },
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "7": {
+    "class_type": "VAEDecodeAudio",
+    "inputs": {
+      "samples": [
+        "6",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "VAE Decode Audio"
+    }
+  },
+  "8": {
+    "class_type": "SaveAudioAdvanced",
+    "inputs": {
+      "audio": [
+        "7",
+        0
+      ],
+      "filename_prefix": "audio/stable_audio_3",
+      "format": "flac"
+    },
+    "_meta": {
+      "title": "[$SAVE]"
+    }
+  }
+}

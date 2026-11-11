@@ -1,6 +1,6 @@
 [project]
 name = "dreamer-mcp"
-version = "0.6.2"
+version = "0.7.0"
 description = "MCP server for a remote ComfyUI instance (HTTP API), designed to run in Docker/Kubernetes"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,6 +12,7 @@ dependencies = [
     "pillow>=10.0",
     "uvicorn>=0.30",
     "websockets>=13",
+    "soundfile>=0.12",
 ]
 
 [project.urls]

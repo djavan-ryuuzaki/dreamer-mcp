@@ -32,7 +32,7 @@ from .media import mime_type
 
 COMFYUI_PREFIX = "comfyui:"
 MANIFEST_NAMES = ("workflows.yaml", "workflows.yml")
-PRESET_KINDS = ("image", "asset", "upscale", "video", "audio", "music", "music_cover",
+PRESET_KINDS = ("image", "asset", "upscale", "video", "audio", "sound", "music", "music_cover",
                 "song_abc", "ui_design", "ui_edit", "ui_decompose")
 SEED_INPUTS = {"seed", "noise_seed"}
 MODEL_EXTS = (".safetensors", ".gguf", ".ckpt", ".pt", ".pth", ".bin", ".sft", ".onnx")
@@ -158,6 +158,9 @@ class WorkflowEntry:
     score: dict[str, str] = field(default_factory=dict)
     """{"param": "<abc param>", "output": "<label>"}: also return the sheet music (PDF) of
     the ABC the caller passed in `param`, or else of the ABC text produced by `output`."""
+    audio_format: dict[str, str] = field(default_factory=dict)
+    """{"param": "<choice param>", "output": "<label of a SaveAudioAdvanced node>"}: save that
+    output as flac/mp3/opus, or as flac converted to wav/ogg/aiff when the job finishes."""
 
     @property
     def source(self) -> str:
@@ -201,6 +204,7 @@ def load_manifest(workflows_dir: Path) -> Manifest:
             trim_alpha=dict(spec.get("trim_alpha") or {}),
             split_alpha=dict(spec.get("split_alpha") or {}),
             score={str(k): str(v) for k, v in (spec.get("score") or {}).items()},
+            audio_format={str(k): str(v) for k, v in (spec.get("audio_format") or {}).items()},
         )
     return Manifest(presets=dict(raw.get("presets") or {}), workflows=workflows)
 

@@ -21,11 +21,18 @@ from PIL import Image as PILImage
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 
-from . import __version__, abc, design, imaging, requirements, score
+from . import __version__, abc, design, imaging, requirements, score, sound
 from .client import ComfyClient, ComfyUIError
 from .config import get_settings
 from .convert import convert_ui_to_api
-from .media import MEDIA_PREFIX, MediaLinks, MediaSigner, make_media_handler, media_kind
+from .media import (
+    MEDIA_PREFIX,
+    MediaLinks,
+    MediaSigner,
+    make_media_handler,
+    media_kind,
+    mime_type,
+)
 from .progress import ProgressTracker
 from .workflows import (
     WorkflowEntry,
@@ -48,7 +55,8 @@ Tools for a remote ComfyUI server.
 Typical flow: comfyui_workflows -> comfyui_workflow_info (see params/inputs) -> comfyui_run
 (wait=false returns a prompt_id) -> comfyui_job_status -> comfyui_get_output / comfyui_view_image.
 For everyday tasks prefer the presets: comfyui_generate_image, comfyui_generate_asset, comfyui_upscale,
-comfyui_generate_video, comfyui_generate_music (songs, covers), comfyui_song_to_abc.
+comfyui_generate_video, comfyui_generate_music (songs, covers), comfyui_song_to_abc,
+comfyui_generate_sound (instrumental music, instruments/loops, SFX, one-shots; no vocals).
 UI screens, banners and posters (exact text and layout): comfyui_generate_ui_design ->
 comfyui_edit_ui_design -> comfyui_decompose_ui (split into reusable transparent layers).
 Generations can take minutes: for video/audio prefer wait=false and poll comfyui_job_status.
@@ -70,6 +78,7 @@ _registry: WorkflowRegistry | None = None
 _media: MediaLinks | None = None
 _tracker: ProgressTracker | None = None
 _scores: dict[str, dict] = {}  # prompt_id -> score output rendered from the workflow's ABC
+_converted: dict[str, dict[str, dict]] = {}  # prompt_id -> {"node/filename": converted output}
 
 
 def client() -> ComfyClient:
@@ -175,8 +184,9 @@ def _resource_links(outputs: list[dict]) -> list[ResourceLink]:
 
 
 async def _job_status(prompt_id: str, include_temp: bool = False,
-                      scores: bool = False) -> dict[str, Any]:
-    """`scores`: once the job succeeded, add its sheet music (rendered on first request)."""
+                      finish: bool = False) -> dict[str, Any]:
+    """`finish`: once the job succeeded, convert its audio to the format asked for and add its
+    sheet music (both done on the first request, then cached)."""
     c = client()
     history = await c.history(prompt_id)
     if prompt_id in history:
@@ -197,7 +207,11 @@ async def _job_status(prompt_id: str, include_temp: bool = False,
         result["outputs"] = extract_outputs(entry, media().links, include_temp)
         if texts := extract_texts(entry):
             result["texts"] = texts
-        if scores and state == "success":
+        if finish and state == "success":
+            try:
+                result["outputs"] = await _convert_outputs(prompt_id, entry, result["outputs"])
+            except (ComfyUIError, OSError, RuntimeError) as e:  # the original file stays listed
+                result["convert_error"] = f"audio not converted: {e}"
             out = await _workflow_score(prompt_id, entry)
             if isinstance(out, str):
                 result["score_error"] = out
@@ -265,7 +279,7 @@ async def _wait(prompt_id: str, timeout: int, ctx: Context | None = None) -> dic
     delay = 0.5
     try:
         while True:
-            status = await _job_status(prompt_id, scores=True)
+            status = await _job_status(prompt_id, finish=True)
             if status["status"] in DONE or time.monotonic() >= deadline:
                 if status["status"] not in DONE:
                     status["note"] = (
@@ -321,6 +335,7 @@ async def _execute(
     graph, applied, ignored = await build_graph(
         reg, entry, params=params, overrides=inputs, randomize=randomize_seed, graph=graph
     )
+    _prepare_audio_format(entry, graph, applied)
     score_out = await _prepare_score(entry, graph, params or {})
     if (t := tracker()) is not None:
         await t.ensure_connected()  # before submitting: ComfyUI only tells the socket it knows
@@ -356,6 +371,54 @@ async def _execute(
         if preview:
             content.extend(await _previews(result.get("outputs", [])))
     return content
+
+
+def _prepare_audio_format(entry: WorkflowEntry, graph: dict, applied: dict[str, Any]) -> None:
+    """Workflows with `audio_format`: set the save node to the format asked for. Formats ComfyUI
+    can't write are saved as flac and marked in the submitted graph (_meta), so whoever reads the
+    finished job (_convert_outputs) converts them."""
+    cfg = entry.audio_format
+    fmt = applied.get(cfg.get("param", ""))
+    node = next((nid for nid, n in graph.items()
+                 if (n.get("_meta") or {}).get("mcp_output") == cfg.get("output")), None)
+    if not cfg or not fmt or node is None:
+        return
+    try:
+        if sound.set_save_format(graph[node], str(fmt)):
+            graph[node]["_meta"]["mcp_convert"] = {"format": fmt}
+    except ValueError as e:
+        raise WorkflowError(str(e)) from e
+
+
+async def _convert_outputs(prompt_id: str, entry: dict, outputs: list[dict]) -> list[dict]:
+    """Replace the audio outputs of nodes marked `mcp_convert` with a copy in that format, saved
+    next to the original in ComfyUI's output dir."""
+    prompt = entry.get("prompt") or []
+    graph = prompt[2] if len(prompt) > 2 and isinstance(prompt[2], dict) else {}
+    marked = {nid: n["_meta"]["mcp_convert"]["format"] for nid, n in graph.items()
+              if isinstance((n.get("_meta") or {}).get("mcp_convert"), dict)}
+    if not marked:
+        return outputs
+    done = _converted.setdefault(prompt_id, {})
+    c, result = client(), []
+    for out in outputs:
+        fmt = marked.get(out["node"])
+        if fmt is None or media_kind(out["filename"]) != "audio":
+            result.append(out)
+            continue
+        key = f"{out['node']}/{out['filename']}"
+        if key not in done:
+            data = (await c.view(out["filename"], out["subfolder"], out["type"])).content
+            converted = await anyio.to_thread.run_sync(sound.convert, data, fmt)
+            name = f"{PurePosixPath(out['filename']).stem}.{fmt}"
+            saved = await c.upload(converted, name, overwrite=True, type_="output",
+                                   subfolder=out["subfolder"])
+            filename, subfolder = saved.get("name", name), saved.get("subfolder", out["subfolder"])
+            done[key] = {**out, "filename": filename, "subfolder": subfolder, "type": "output",
+                         "mime_type": mime_type(filename), "converted_from": out["filename"],
+                         **media().links(filename, subfolder, "output")}
+        result.append(done[key])
+    return result
 
 
 def _score_output(node: str, filename: str) -> dict[str, Any]:
@@ -563,11 +626,11 @@ async def comfyui_status() -> dict[str, Any]:
 @mcp.tool(annotations=READ_ONLY)
 @tool_errors
 async def comfyui_requirements(
-    group: Literal["image", "video", "audio"] | None = None,
+    group: Literal["image", "design", "video", "audio", "sound"] | None = None,
 ) -> dict[str, Any]:
     """Custom nodes, models (with download links and target folders) and workflows the presets
     need, each checked against the ComfyUI server: status ok / missing. group: image (also
-    assets), video or audio; all when omitted."""
+    assets), design, video, audio (songs) or sound (Stable Audio 3); all when omitted."""
     report = await requirements.check(client(), [group] if group else None)
     report["missing"] = requirements.missing_count(report)
     return report
@@ -768,7 +831,7 @@ async def comfyui_job_status(prompt_id: str) -> dict[str, Any]:
     or not_found. Running jobs queued by this server include `progress`: the node being executed
     (node_type), its sampling step/steps and percent, nodes_done/nodes_total and elapsed_s.
     Finished jobs include their output files (and sheet music for music jobs)."""
-    return await _job_status(prompt_id, scores=True)
+    return await _job_status(prompt_id, finish=True)
 
 
 @mcp.tool(annotations=READ_ONLY, structured_output=False)
@@ -781,7 +844,7 @@ async def comfyui_get_output(prompt_id: str, include_temp: bool = False) -> list
         prompt_id: Job id returned by comfyui_run or a preset tool.
         include_temp: Also include temporary preview files (PreviewImage nodes).
     """
-    status = await _job_status(prompt_id, include_temp=include_temp, scores=True)
+    status = await _job_status(prompt_id, include_temp=include_temp, finish=True)
     if status["status"] not in DONE:
         status["note"] = "Job has not finished yet."
     return [status, *_resource_links(status.get("outputs", []))]
@@ -1297,7 +1360,9 @@ async def comfyui_generate_audio(
     timeout: int | None = None,
     ctx: Context | None = None,
 ) -> list[Any]:
-    """Generate audio/music with the default audio workflow (preset "audio").
+    """Generate audio with the default audio workflow (preset "audio": by default the Stable
+    Audio 3 workflow of comfyui_generate_sound, which also takes a category and an output format,
+    so prefer that tool; songs with vocals: comfyui_generate_music).
     `prompt` describes the sound/style, `lyrics` is for song models, `duration` in seconds.
 
     Empty arguments keep the workflow's own values. `extra` sets more workflow params or raw
@@ -1306,6 +1371,47 @@ async def comfyui_generate_audio(
         "audio", workflow,
         {"prompt": prompt, "negative_prompt": negative_prompt, "lyrics": lyrics,
          "duration": duration, "seed": seed, "steps": steps},
+        extra, wait=wait, timeout=timeout, ctx=ctx,
+    )
+
+
+def _with_sound_guide(fn):
+    """Append sound.SOUND_GUIDE to the tool description."""
+    fn.__doc__ = (fn.__doc__ or "").rstrip() + "\n\n" + sound.SOUND_GUIDE
+    return fn
+
+
+@mcp.tool(structured_output=False)
+@_with_sound_guide
+@tool_errors
+async def comfyui_generate_sound(
+    prompt: str,
+    category: Literal["music", "instrument", "sfx", "one_shot"],
+    duration: float,
+    format: Literal["flac", "mp3", "opus", "wav", "ogg", "aiff"] = "mp3",
+    seed: int | None = None,
+    steps: int | None = None,
+    extra: dict[str, Any] | None = None,
+    workflow: str | None = None,
+    wait: bool = False,
+    timeout: int | None = None,
+    ctx: Context | None = None,
+) -> list[Any]:
+    """Generate a sound with Stable Audio 3 (preset "sound"), with no vocals: an instrumental
+    track (category "music"), an isolated instrument, stem or loop ("instrument"), a sound effect
+    or ambience ("sfx"), or a short one-shot sample ("one_shot"). `duration` in seconds (0.5-380).
+    Returns the audio (label "audio") in `format`; wav/ogg/aiff are converted when the job
+    finishes (with wait=false they show up in comfyui_job_status / comfyui_get_output).
+    The prompt actually sent to the model is in `applied.prompt`.
+    """
+    try:
+        duration = sound.check_duration(duration)
+        text = sound.sound_prompt(prompt, category, duration)
+    except ValueError as e:
+        raise ToolError(str(e)) from e
+    return await _run_preset(
+        "sound", workflow,
+        {"prompt": text, "duration": duration, "format": format, "seed": seed, "steps": steps},
         extra, wait=wait, timeout=timeout, ctx=ctx,
     )
 

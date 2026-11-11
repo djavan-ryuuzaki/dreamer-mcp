@@ -38,7 +38,7 @@ def _client(classes, models, flows, workflows_dir="workflows"):
 
 def test_bundled_list_is_well_formed():
     spec = requirements.load()
-    assert set(spec["groups"]) == {"image", "design", "video", "audio"}
+    assert set(spec["groups"]) == {"image", "design", "video", "audio", "sound"}
     for g in spec["groups"].values():
         for m in g["models"]:
             assert {"file", "folder", "url", "size_gb"} <= set(m)
@@ -64,9 +64,10 @@ async def test_missing_items_and_optional_nodes(tmp_path):
     # tmp_path: no shipped copies of the workflows to fall back to
     report = await requirements.check(_client(classes, models, flows, tmp_path))
     ready = {g["name"]: g["ready"] for g in report["groups"]}
-    assert ready == {"image": False, "design": True, "video": False, "audio": False}
+    assert ready == {"image": False, "design": True, "video": False, "audio": False,
+                     "sound": False}
     # easy ifElse counts twice: image and audio both need ComfyUI-Easy-Use
-    assert requirements.missing_count(report) == 4
+    assert requirements.missing_count(report) == 5  # + stable_audio_3 (checkpoints)
     image = next(g for g in report["groups"] if g["name"] == "image")
     easy = next(n for n in image["nodes"] if n["package"] == "ComfyUI-Easy-Use")
     assert easy["missing_classes"] == ["easy ifElse"]
