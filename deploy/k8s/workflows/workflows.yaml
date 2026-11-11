@@ -5,7 +5,7 @@
 #   comfyui_workflows under their file name and can be run with raw `inputs`.
 # - Here you give each workflow friendly params and pick the presets used by
 #   comfyui_generate_image / comfyui_upscale / comfyui_generate_video / comfyui_generate_audio /
-#   comfyui_generate_music / comfyui_song_to_abc.
+#   comfyui_generate_sound / comfyui_generate_music / comfyui_song_to_abc.
 #
 # Param target:  "<node id or title>.<input>"   e.g. "6.text" or "Positive Prompt.text"
 #                (a list of targets writes the same value to several nodes)
@@ -23,7 +23,8 @@ presets:
   asset: generate_asset
   upscale: null # e.g. upscale (needs RealESRGAN_x4plus.pth in models/upscale_models)
   video: minimax_h3_r2v
-  audio: generate_music
+  audio: generate_sound
+  sound: generate_sound
   music: generate_music
   music_cover: generate_cover_music
   song_abc: generate_song_abc
@@ -270,6 +271,23 @@ workflows:
       seed:         {target: "129.noise_seed", type: seed}
       lightning:    {target: "146.value", type: bool, description: "Fast 3-step Lightning LoRA (true) or full quality (false)"}
       steps:        {target: "143.value", type: int, description: Steps when lightning=false}
+
+  generate_sound:
+    # From the UI workflow audio_stable_audio_3_medium.json (a subgraph, rebuilt by hand) without
+    # its Qwen 3.5 prompt rewriter: the caller writes the final prompt, and comfyui_generate_sound
+    # adds the category tag and the length (see sound.py). No vocals.
+    file: "comfyui:api/generate_sound.json"
+    fallback: generate_sound.json
+    description: Stable Audio 3 Medium - instrumental music, isolated instruments and loops, SFX/ambiences and one-shots (no vocals); flac, mp3, opus, wav, ogg or aiff
+    outputs:
+      audio: "[$SAVE]"
+    audio_format: {param: format, output: audio}
+    params:
+      prompt:   {target: "[$PROMPT].text", type: string, description: "Sound description (comfyui_generate_sound adds the TrackType tag and the length)"}
+      duration: {target: "[$DURATION].seconds", type: float, description: "Length in seconds (0.5-380)"}
+      format:   {type: choice, choices: [flac, mp3, opus, wav, ogg, aiff], default: mp3, description: "flac/mp3/opus saved by ComfyUI; wav/ogg (Vorbis)/aiff converted from flac"}
+      steps:    {target: "6.steps", type: int, description: "Sampling steps (default 8)"}
+      seed:     {target: "6.seed", type: seed}
 
   generate_music:
     # From the UI workflow GENERATE_MUSIC.json. Without `abc`, YuE2 writes the score (ABC

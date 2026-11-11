@@ -16,8 +16,11 @@ Kubernetes) apontando para o ComfyUI onde quer que ele esteja. O modo stdio tamb
 ## Destaques
 
 - **Presets de um comando:** `comfyui_generate_image`, `comfyui_generate_asset`,
-  `comfyui_generate_video`, `comfyui_generate_music`, `comfyui_song_to_abc` e `comfyui_upscale`,
-  cada um ligado a um workflow seu.
+  `comfyui_generate_video`, `comfyui_generate_music`, `comfyui_generate_sound`,
+  `comfyui_song_to_abc` e `comfyui_upscale`, cada um ligado a um workflow seu.
+- **Sons sem voz:** `comfyui_generate_sound` (Stable Audio 3) faz trilha instrumental,
+  instrumento isolado ou loop, efeito sonoro/ambiência e one-shot, em flac, mp3, opus, wav, ogg ou
+  aiff (prontos para engines de jogo e DAWs).
 - **Música com partitura:** o YuE2 pode seguir uma partitura ABC sua (escrita por você ou por um
   LLM), que é reescrita automaticamente no dialeto que o modelo entende; covers a partir de uma
   música de referência.
@@ -64,7 +67,8 @@ Kubernetes) apontando para o ComfyUI onde quer que ele esteja. O modo stdio tamb
 | `comfyui_decompose_ui` | Preset `ui_decompose`: separa a tela em camadas RGBA (assets reutilizáveis) |
 | `comfyui_upscale` | Preset `upscale` |
 | `comfyui_generate_video` | Preset `video` |
-| `comfyui_generate_audio` | Preset `audio` (genérico: prompt + letra + duração) |
+| `comfyui_generate_audio` | Preset `audio` (genérico: prompt + letra + duração; por padrão o mesmo workflow de `comfyui_generate_sound`) |
+| `comfyui_generate_sound` | Preset `sound`: Stable Audio 3, sem vocais; recebe a descrição, a categoria (`music`, `instrument`, `sfx`, `one_shot`), a duração e o formato |
 | `comfyui_generate_music` | Presets `music` / `music_cover`: música com vocais, opcionalmente seguindo uma partitura ABC ou fazendo cover de uma música |
 | `comfyui_song_to_abc` | Preset `song_abc`: transcreve uma música para ABC (SheetSage2), com partitura em PDF |
 | `comfyui_normalize_abc` | Converte ABC qualquer para o dialeto do YuE2 e aponta problemas (sem executar nada) |
@@ -175,6 +179,18 @@ A LoRA TaoMate acelera o vídeo para 3 passos.
 
 O SheetSage2 só é usado em covers e em `comfyui_song_to_abc`.
 
+**Sons sem voz** (`comfyui_generate_sound`), Stable Audio 3 Medium, ~9,7 GB:
+
+| Arquivo | Pasta | Tamanho |
+|---|---|---|
+| [`stable_audio_3_medium.safetensors`](https://huggingface.co/Comfy-Org/stable-audio-3/resolve/main/checkpoints/stable_audio_3_medium.safetensors) | `checkpoints` | 8,6 GB |
+| [`t5gemma_b_b_ul2.safetensors`](https://huggingface.co/Comfy-Org/stable-audio-3/resolve/main/text_encoders/t5gemma_b_b_ul2.safetensors) | `text_encoders` | 1,1 GB |
+
+O workflow original do ComfyUI também carrega o Qwen 3.5 2B para reescrever o prompt; a versão
+incluída não usa: quem chama a ferramenta escreve o prompt, seguindo o
+[guia de prompts do Stable Audio 3](https://github.com/Stability-AI/stable-audio-3/blob/main/docs/guides/prompting.md)
+resumido na descrição dela.
+
 Só é preciso instalar o que for usar: cada grupo funciona sozinho. Os workflows já vêm com o MCP
 (veja abaixo), então basta ter os nós e os modelos.
 
@@ -205,7 +221,8 @@ Os presets já vêm prontos, em [`workflows/`](workflows) (também embutidos no 
 | `edit_ui_design.json` | `ui_edit` | Ming Image 0.1 Design: edita uma tela, com até 7 imagens de referência |
 | `decompose_ui.json` | `ui_decompose` | Ming Image 0.1 Design-Layer: decompõe em N camadas RGBA |
 | `minimax_h3_r2v.json` | `video` | MiniMax H3: vídeo com som a partir de 2 imagens de referência |
-| `generate_music.json` | `audio`, `music` | YuE2: música com vocais a partir de estilo + letra, com partitura ABC opcional; devolve o áudio e o ABC usado (`.md`) |
+| `generate_sound.json` | `audio`, `sound` | Stable Audio 3 Medium: música instrumental, instrumento/loop, SFX e one-shot, sem o reescritor de prompt (Qwen 3.5) do workflow original |
+| `generate_music.json` | `music` | YuE2: música com vocais a partir de estilo + letra, com partitura ABC opcional; devolve o áudio e o ABC usado (`.md`) |
 | `generate_cover_music.json` | `music_cover` | YuE2 + SheetSage2: cover (nova letra/estilo sobre a melodia de uma música) |
 | `generate_song_abc.json` | `song_abc` | SheetSage2: transcreve uma música para ABC |
 | `yue2_text2music.json` | – | YuE2: versão anterior (estilo + letra) |
@@ -298,6 +315,24 @@ uma letra em português, contra −1% com a partitura do próprio YuE2). O que a
 - **Harmonia própria no pré-refrão** (o IV ou o ii, uma dominante) para criar tensão.
 - **Frases regulares** (2 ou 4 compassos, seções de 4 ou 8) e uma linha instrumental que muda entre
   as seções (riff na intro, levada nos versos, mais cheia nos refrões).
+
+### Sons: categoria, duração e formato
+
+`comfyui_generate_sound(prompt, category, duration, format)` não reescreve o prompt com outro
+modelo: o LLM que chama escreve a descrição, em inglês, como um catálogo de sons a descreveria (a
+descrição da ferramenta resume o guia do Stable Audio 3 por categoria). O MCP só acrescenta o que o
+modelo espera em volta dela:
+
+- a tag da categoria no começo: `TrackType: Music, VocalType: Instrumental` (`music`),
+  `TrackType: Instrument` (`instrument`) ou `TrackType: SFX` (`sfx` e `one_shot`);
+- `Length: N seconds` no fim, a partir de `duration` (de 0,5 a 380 s).
+
+Uma tag ou duração já escrita no prompt é mantida. O prompt enviado volta em `applied.prompt`.
+
+`format`: `flac`, `mp3` (V0) e `opus` (192k) são gravados pelo próprio ComfyUI
+(`SaveAudioAdvanced`); `wav` (PCM 16 bits), `ogg` (Vorbis) e `aiff` são convertidos pelo MCP, a
+partir do flac, quando o job termina, e gravados ao lado dele em `output/audio/`. A saída `audio`
+já aponta para o arquivo convertido (`converted_from` diz de qual flac veio). O padrão é `mp3`.
 
 ### Partitura em PDF
 

@@ -35,6 +35,10 @@ MEDIA_PREFIX = "/media/"
 PASSTHROUGH_HEADERS = ("content-type", "content-length", "content-range", "accept-ranges",
                        "last-modified", "etag")
 mimetypes.add_type("audio/flac", ".flac")
+mimetypes.add_type("audio/wav", ".wav")  # the OS tables differ (audio/x-wav, audio/wave...)
+mimetypes.add_type("audio/ogg", ".ogg")
+mimetypes.add_type("audio/ogg", ".opus")  # Ogg Opus
+mimetypes.add_type("audio/aiff", ".aiff")
 mimetypes.add_type("video/webm", ".webm")
 
 
