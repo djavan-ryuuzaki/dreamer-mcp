@@ -77,6 +77,9 @@ class ParamSpec:
     flatten_alpha: str | None = None
     """For file/file_list: composite transparent images onto this color (e.g. "#ffffff")
     before ComfyUI's LoadImage drops the alpha channel."""
+    max_side: int | None = None
+    """For file/file_list: images whose longest side is larger are scaled down to it (keeping
+    the aspect ratio) before upload, e.g. to bound the output size of an upscale."""
     transform: dict[str, str] = field(default_factory=dict)
     """For strings: {"name": "<TRANSFORMS key>", "<arg>": "<node>.<input>"...}. The value is
     rewritten once every param is applied; each arg is read from that input of the final graph
@@ -104,6 +107,7 @@ class ParamSpec:
             prepend_when={str(k): str(v) for k, v in (raw.get("prepend_when") or {}).items()},
             multiple_of=int(raw["multiple_of"]) if raw.get("multiple_of") else None,
             flatten_alpha=raw.get("flatten_alpha"),
+            max_side=int(raw["max_side"]) if raw.get("max_side") else None,
             transform=_parse_transform(name, raw.get("transform")),
         )
 
@@ -505,6 +509,8 @@ class InputFile:
     name: str
     """Value for the Load* node (a file in ComfyUI's input dir, or "<path> [output]")."""
     size: tuple[int, int] | None = None
+    original_size: tuple[int, int] | None = None
+    """Size before a max_side downscale (None when the image was not resized)."""
 
 
 def parse_file_ref(value: str) -> tuple[str, str, str]:
@@ -532,29 +538,38 @@ async def _decode_source(client: ComfyClient, value: str) -> tuple[bytes | None,
 
 
 async def prepare_input_file(
-    client: ComfyClient, value: str, flatten: str | None = None, want_size: bool = False
+    client: ComfyClient, value: str, flatten: str | None = None, want_size: bool = False,
+    max_side: int | None = None,
 ) -> InputFile:
     """Upload a URL/data URI/base64 value (or reuse a ComfyUI filename), optionally flattening
-    transparency and reading the image size."""
+    transparency, scaling it down to max_side and reading the image size."""
     data, ext = await _decode_source(client, value)
     fresh = data is not None
     if data is None:
         is_image = mime_type(parse_file_ref(value)[0]).startswith("image/")
-        if not (flatten or want_size) or not is_image:
+        if not (flatten or want_size or max_side) or not is_image:
             return InputFile(value)
         try:
             data = (await client.view(*parse_file_ref(value))).content
         except ComfyUIError:
             return InputFile(value)  # let ComfyUI report a missing file
     img = imaging.open_image(data)
+    original = img.size if img is not None else None
+    if img is not None:
+        out = img
+        if flatten and imaging.has_alpha(out):
+            out = imaging.flatten_image(out, flatten)
+        if max_side:
+            out = imaging.shrink_image(out, max_side)
+        if out is not img:
+            data, ext, fresh, img = imaging.png_bytes(out), ".png", True, out
     size = img.size if img is not None else None
-    if img is not None and flatten and imaging.has_alpha(img):
-        data, ext, fresh = imaging.flatten(img, flatten), ".png", True
+    resized_from = original if original != size else None
     if not fresh:
         return InputFile(value, size)
     result = await client.upload(data, f"mcp_{uuid.uuid4().hex[:12]}{ext}")
     sub = result.get("subfolder")
-    return InputFile(f"{sub}/{result['name']}" if sub else result["name"], size)
+    return InputFile(f"{sub}/{result['name']}" if sub else result["name"], size, resized_from)
 
 
 async def upload_input_file(client: ComfyClient, value: str) -> str:
@@ -601,7 +616,8 @@ async def build_graph(
             raise WorkflowError(f"'{name}' accepts at most {len(spec.targets)} files")
         files[name] = [
             await prepare_input_file(registry.client, str(v), spec.flatten_alpha,
-                                     want_size=(name == size_from and i == 0))
+                                     want_size=(name == size_from and i == 0),
+                                     max_side=spec.max_side)
             for i, v in enumerate(values[:1] if spec.type == "file" else values)
         ]
     if derive_size:
@@ -610,6 +626,9 @@ async def build_graph(
             params[size_names[0]], params[size_names[1]] = dims
 
     for name, spec in entry.params.items():
+        if resized := [f"{f.original_size[0]}x{f.original_size[1]} -> {f.size[0]}x{f.size[1]}"
+                       for f in files.get(name, []) if f.original_size and f.size]:
+            applied[f"{name}_resized"] = resized if spec.type == "file_list" else resized[0]
         value = params.get(name, spec.default)
         if value is not None and spec.append_when:
             extra = [text.strip() for flag_name, text in spec.append_when.items() if flag(flag_name)]

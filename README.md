@@ -60,12 +60,12 @@ Kubernetes) apontando para o ComfyUI onde quer que ele esteja. O modo stdio tamb
 | `comfyui_queue` | Lista ou limpa a fila |
 | `comfyui_upload_file` | Envia imagem/áudio/vídeo (URL/base64) para a pasta `input` |
 | `comfyui_free_memory` | Descarrega modelos e libera VRAM |
-| `comfyui_generate_image` | Preset `image`: gera; com `images`, edita |
+| `comfyui_generate_image` | Preset `image` (ou `image_turbo` com `turbo=true`): gera; com `images`, edita |
 | `comfyui_generate_asset` | Preset `asset`: PNG com fundo transparente |
 | `comfyui_generate_ui_design` | Preset `ui_design`: tela, banner, poster a partir de uma legenda estilo Figma (Ming Image) |
 | `comfyui_edit_ui_design` | Preset `ui_edit`: edita uma tela (mover, trocar, remover elementos), com até 7 referências |
 | `comfyui_decompose_ui` | Preset `ui_decompose`: separa a tela em camadas RGBA (assets reutilizáveis) |
-| `comfyui_upscale` | Preset `upscale` |
+| `comfyui_upscale` | Preset `upscale` (ou `upscale_turbo` com `turbo=true`): Qwen Image 2.1 reamostra a imagem em resolução maior |
 | `comfyui_generate_video` | Preset `video` |
 | `comfyui_generate_audio` | Preset `audio` (genérico: prompt + letra + duração; por padrão o mesmo workflow de `comfyui_generate_sound`) |
 | `comfyui_generate_sound` | Preset `sound`: Stable Audio 3, sem vocais; recebe a descrição, a categoria (`music`, `instrument`, `sfx`, `one_shot`), a duração e o formato |
@@ -137,11 +137,13 @@ estiverem faltando, atualize-o.
 
 Cada arquivo vai para `ComfyUI/models/<pasta>/`; subpastas também valem.
 
-**Imagens e assets** (`comfyui_generate_image`, `comfyui_generate_asset`), Qwen Image 2.1, ~17 GB:
+**Imagens, assets e upscale** (`comfyui_generate_image`, `comfyui_generate_asset`, `comfyui_upscale`),
+Qwen Image 2.1, ~17 GB (+7,3 GB do modelo Turbo, usado com `turbo=true`):
 
 | Arquivo | Pasta | Tamanho |
 |---|---|---|
 | [`qwen_image_2.1_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors) | `diffusion_models` | 7,3 GB |
+| [`qwen_image_2.1_turbo_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors) | `diffusion_models` | 7,3 GB |
 | [`qwen3vl_8b_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors) | `text_encoders` | 9,4 GB |
 | [`qwen_image_2.1_vae_bf16.safetensors`](https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors) | `vae` | 0,7 GB |
 
@@ -215,7 +217,10 @@ Os presets já vêm prontos, em [`workflows/`](workflows) (também embutidos no 
 
 | Arquivo | Preset | Modelo |
 |---|---|---|
-| `generate_image.json` | `image` | Qwen Image 2.1: gera ou edita (1 a 9 referências) + upscale |
+| `generate_image.json` | `image` | Qwen Image 2.1: gera ou edita (1 a 9 referências), 30 passos |
+| `generate_image_turbo.json` | `image_turbo` | Qwen Image 2.1 Turbo: o mesmo fluxo em 8 passos |
+| `upscale_image.json` | `upscale` | Qwen Image 2.1: upscale (reamostra a imagem no tamanho dela × `scale`, 1,5x por padrão; entradas acima de 1536 px no maior lado são reduzidas antes), 30 passos |
+| `upscale_image_turbo.json` | `upscale_turbo` | Qwen Image 2.1 Turbo: o mesmo upscale em 8 passos |
 | `generate_asset.json` | `asset` | Qwen Image 2.1: PNG com fundo transparente + upscale |
 | `generate_ui_design.json` | `ui_design` | Ming Image 0.1 Design: tela/banner/poster a partir de legenda estilo Figma |
 | `edit_ui_design.json` | `ui_edit` | Ming Image 0.1 Design: edita uma tela, com até 7 imagens de referência |
@@ -390,6 +395,7 @@ os slots sem arquivo são removidos do grafo, junto com o que depende deles:
         type: file_list
         prune_missing: true
         flatten_alpha: "#ffffff"   # PNGs transparentes são achatados antes do upload
+        max_side: 1536             # opcional: imagens maiores são reduzidas antes do upload
     when_missing:                  # overrides quando o param NÃO é enviado
       images: {"[$MANTER_RESOLUCAO].value": false}
     when_set:                      # overrides quando o param É enviado

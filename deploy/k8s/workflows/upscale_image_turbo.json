@@ -1,0 +1,174 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "qwen_image_2.1_turbo_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Load Diffusion Model"
+    }
+  },
+  "3": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_8b_int8_convrot.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "4": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+    },
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "17": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example.png"
+    },
+    "_meta": {
+      "title": "[$IMAGEM_0]"
+    }
+  },
+  "115": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 788416263310827,
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "143",
+        0
+      ],
+      "positive": [
+        "123",
+        0
+      ],
+      "negative": [
+        "123",
+        1
+      ],
+      "latent_image": [
+        "155",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "117": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "115",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "118": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "dreamer-mcp/UP_IMAGE_TURBO",
+      "images": [
+        "117",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "123": {
+    "class_type": "TextEncodeQwenImage21",
+    "inputs": {
+      "prompt": "<image1> Preserve all elements in the image. And up sampling to higher resolutions.",
+      "negative_prompt": "",
+      "resolution": 0,
+      "clip": [
+        "3",
+        0
+      ],
+      "images.image_1": [
+        "17",
+        0
+      ],
+      "vae": [
+        "4",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Text Encode Qwen Image 2.1"
+    }
+  },
+  "143": {
+    "class_type": "ModelAttentionBackend",
+    "inputs": {
+      "attention": "comfy kitchen attention",
+      "model": [
+        "1",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Model Attention Backend"
+    }
+  },
+  "155": {
+    "class_type": "LatentUpscaleBy",
+    "inputs": {
+      "upscale_method": "bilinear",
+      "scale_by": 1.5,
+      "samples": [
+        "123",
+        2
+      ]
+    },
+    "_meta": {
+      "title": "Upscale Latent By"
+    }
+  },
+  "158": {
+    "class_type": "easy cleanGpuUsed",
+    "inputs": {
+      "anything": [
+        "117",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Clean VRAM Used"
+    }
+  },
+  "159": {
+    "class_type": "easy clearCacheAll",
+    "inputs": {
+      "anything": [
+        "158",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Clear Cache All"
+    }
+  }
+}

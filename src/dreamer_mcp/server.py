@@ -699,6 +699,8 @@ async def comfyui_workflow_info(workflow: str) -> dict[str, Any]:
                 "description": p.description}
         if p.type == "choice":
             info["choices"] = await param_choices(reg.client, graph, p)
+        if p.max_side:
+            info["max_side"] = p.max_side
         if p.remove_when_false:
             info["removes_when_false"] = p.remove_when_false
         if p.remove_when_true:
@@ -942,7 +944,7 @@ async def comfyui_generate_image(
     height: int | None = None,
     aspect_ratio: str | None = None,
     megapixels: float | None = None,
-    upscale: bool | None = None,
+    turbo: bool = False,
     seed: int | None = None,
     steps: int | None = None,
     cfg: float | None = None,
@@ -954,23 +956,23 @@ async def comfyui_generate_image(
     preview: bool = True,
     ctx: Context | None = None,
 ) -> list[Any]:
-    """Generate or edit images with the default image workflow (preset "image").
+    """Generate or edit images with the default image workflow (preset "image", or
+    "image_turbo" with `turbo=true`: a distilled model at 8 steps, several times faster).
     Without `images` it generates from the prompt. With `images` (URLs, base64, or ComfyUI
     input filenames) it edits them following the prompt, if the workflow supports it; refer to
     them in the prompt as <image1>, <image2>... in the order given.
     Size: width/height in pixels, or aspect_ratio (any ratio: "16:9", "5:4", "1.5") and/or
     megapixels (1.0 = ~1024x1024), converted to pixels. Without any size it generates
     1024x1024; when editing it uses the size of <image1> (scaled down if very large).
-    `upscale` toggles the extra upscaled output when the workflow has one. Each output file has a
-    `label` (e.g. "base", "upscale") when the workflow defines them.
+    To upscale the result, pass it to comfyui_upscale.
 
     Empty arguments keep the workflow's own values. `extra` sets more workflow params or raw
     "<node>.<input>" overrides; `workflow` swaps the preset for another workflow."""
     return await _run_preset(
-        "image", workflow,
+        "image_turbo" if turbo else "image", workflow,
         {"prompt": prompt, "images": images or None, "negative_prompt": negative_prompt,
          "width": width, "height": height, "aspect_ratio": aspect_ratio,
-         "megapixels": megapixels, "upscale": upscale, "seed": seed,
+         "megapixels": megapixels, "seed": seed,
          "steps": steps, "cfg": cfg, "batch_size": batch_size},
         extra, wait=wait, timeout=timeout, preview=preview, ctx=ctx,
     )
@@ -1290,6 +1292,8 @@ async def comfyui_decompose_ui(
 async def comfyui_upscale(
     image: str,
     scale: float | None = None,
+    turbo: bool = False,
+    seed: int | None = None,
     extra: dict[str, Any] | None = None,
     workflow: str | None = None,
     wait: bool = True,
@@ -1297,14 +1301,19 @@ async def comfyui_upscale(
     preview: bool = True,
     ctx: Context | None = None,
 ) -> list[Any]:
-    """Upscale an image with the default upscale workflow (preset "upscale").
+    """Upscale an image with the default upscale workflow (preset "upscale", or
+    "upscale_turbo" with `turbo=true`: a distilled model at 8 steps, several times faster).
 
-    `image` may be a URL, data URI, base64, or the name of a file already in ComfyUI's input
-    folder (e.g. a previous output uploaded with comfyui_upload_file).
+    `image` may be a URL (e.g. the `url` of a comfyui_generate_image output), data URI, base64,
+    or the name of a file already in ComfyUI's input folder. `scale` is the workflow's upscale
+    factor (Qwen upscale: the output is the input size x scale, 1.5 by default; inputs over
+    1536 px on the longest side are scaled down first, reported as `image_resized`).
 
-    Empty arguments keep the workflow's own values. `extra` sets more workflow params or raw
-    "<node>.<input>" overrides; `workflow` swaps the preset for another workflow."""
-    return await _run_preset("upscale", workflow, {"image": image, "scale": scale}, extra,
+    Empty arguments keep the workflow's own values. `extra` sets more workflow params (e.g.
+    "prompt", "steps") or raw "<node>.<input>" overrides; `workflow` swaps the preset for
+    another workflow."""
+    return await _run_preset("upscale_turbo" if turbo else "upscale", workflow,
+                             {"image": image, "scale": scale, "seed": seed}, extra,
                              wait=wait, timeout=timeout, preview=preview, ctx=ctx)
 
 
