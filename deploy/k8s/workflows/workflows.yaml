@@ -4,7 +4,7 @@
 #   (in ComfyUI: Workflow > Export (API)). Files not listed here still show up in
 #   comfyui_workflows under their file name and can be run with raw `inputs`.
 # - Here you give each workflow friendly params and pick the presets used by
-#   comfyui_generate_image / comfyui_upscale / comfyui_generate_video / comfyui_generate_audio /
+#   comfyui_generate_image / comfyui_upscale (turbo=true -> image_turbo / upscale_turbo) / comfyui_generate_video / comfyui_generate_audio /
 #   comfyui_generate_sound / comfyui_generate_music / comfyui_song_to_abc.
 #
 # Param target:  "<node id or title>.<input>"   e.g. "6.text" or "Positive Prompt.text"
@@ -20,8 +20,10 @@
 
 presets:
   image: generate_image
+  image_turbo: generate_image_turbo   # comfyui_generate_image(turbo=true)
   asset: generate_asset
-  upscale: null # e.g. upscale (needs RealESRGAN_x4plus.pth in models/upscale_models)
+  upscale: upscale_image              # or "upscale" (RealESRGAN_x4plus.pth in models/upscale_models)
+  upscale_turbo: upscale_image_turbo  # comfyui_upscale(turbo=true)
   video: minimax_h3_r2v
   audio: generate_sound
   sound: generate_sound
@@ -33,16 +35,15 @@ presets:
   ui_decompose: decompose_ui
 
 workflows:
-  generate_image:
-    # From the UI workflow GENERATE_IMAGE.json (converted with comfyui_convert_workflow).
-    # Inputs are the nodes titled [$NAME]. No images -> text-to-image; 1..9 images -> edit.
-    # Two outputs: the base image (SaveImage 160) and a 1.5x upscaled pass (SaveImage 118).
+  generate_image: &generate_image
+    # From the UI workflow GENERATE_IMAGE.json (converted with comfyui_convert_workflow), without
+    # its upscale pass (now upscale_image). Inputs are the nodes titled [$NAME].
+    # No images -> text-to-image; 1..9 images -> edit.
     file: "comfyui:api/generate_image.json"
     fallback: generate_image.json   # copy in this folder, used when ComfyUI has none
-    description: Qwen Image 2.1 generate (no images) or edit (1-9 reference images) at any width/height; returns the base image and an upscaled version
+    description: Qwen Image 2.1 generate (no images) or edit (1-9 reference images) at any width/height (30 steps)
     outputs:                     # label returned with each file
       base: "160"
-      upscale: "118"
     size:                        # when width/height are not given
       aspect_ratio: aspect_ratio # + megapixels -> pixels (e.g. 16:9 @ 1 MP = 1360x768)
       megapixels: megapixels
@@ -61,12 +62,8 @@ workflows:
       aspect_ratio:    {type: string, description: "e.g. 16:9, 3:4, 21:9, 5:4 or 1.5; converted to width/height"}
       megapixels:      {type: float, description: "Image area, 1.0 = ~1024x1024 (default 1.0)"}
       keep_resolution: {target: "[$MANTER_RESOLUCAO].value", type: bool, description: "Editing: let the encoder size the image from <image1> (~1 MP) instead of width/height"}
-      # 117 (the upscale VAEDecode), not just its SaveImage 118: the Clean VRAM/Clear Cache output
-      # nodes 158/159 hang off 117 too, and would keep running the second KSampler (115).
-      upscale:         {remove_when_false: ["117"], type: bool, default: true, description: "Also return the upscaled image (skipping it also skips the second sampling pass)"}
-      save_base:       {remove_when_false: ["160"], type: bool, default: true, description: "Also return the base image"}
-      upscale_factor:  {target: "155.scale_by", type: float, description: "Upscale factor (default 1.5)"}
-      seed:            {target: ["62.seed", "115.seed"], type: seed}
+      steps:           {target: "62.steps", type: int, description: "Sampling steps"}
+      seed:            {target: "62.seed", type: seed}
     when_missing:
       # No images: nothing for the encoder to size from, so use [$WIDTH]/[$HEIGHT]
       images: {"[$MANTER_RESOLUCAO].value": false}
@@ -74,6 +71,42 @@ workflows:
       # Any explicit or derived size means "use [$WIDTH]/[$HEIGHT]", not the encoder's latent
       width: {"[$MANTER_RESOLUCAO].value": false}
       height: {"[$MANTER_RESOLUCAO].value": false}
+
+  generate_image_turbo:
+    # generate_image with the Qwen Image 2.1 Turbo model at 8 steps (same graph and params).
+    <<: *generate_image
+    file: "comfyui:api/generate_image_turbo.json"
+    fallback: generate_image_turbo.json
+    description: Qwen Image 2.1 Turbo (fast, 8 steps) generate (no images) or edit (1-9 reference images) at any width/height
+
+  upscale_image: &upscale_image
+    # The upscale pass of GENERATE_IMAGE.json on its own: <image1> is re-encoded by
+    # TextEncodeQwenImage21 at its own size (resolution 0), its latent scaled by `scale` and
+    # re-sampled (30 steps). Output = input size x scale (768x768 -> 1152x1152); inputs larger
+    # than max_side are scaled down first, so the output stays <= 1536 x scale (2304 at 1.5).
+    file: "comfyui:api/upscale_image.json"
+    fallback: upscale_image.json
+    description: Qwen Image 2.1 upscale - re-samples an image at a higher resolution (default 1.5x its size), preserving its content
+    outputs:
+      upscale: "118"
+    params:
+      image:
+        target: "[$IMAGEM_0].image"
+        type: file
+        flatten_alpha: "#ffffff" # LoadImage drops alpha; don't let hidden colors leak in
+        max_side: 1536           # larger inputs are scaled down first (keeps VRAM/time sane)
+        description: Image to upscale (URL, base64 or ComfyUI input filename); scaled down to 1536 px on the longest side when larger
+      scale:  {target: "155.scale_by", type: float, description: "Upscale factor over the input size (default 1.5)"}
+      prompt: {target: "123.prompt", type: string, description: "Upscale instruction (default: preserve all elements, up sample to higher resolution)"}
+      steps:  {target: "115.steps", type: int, description: "Sampling steps"}
+      seed:   {target: "115.seed", type: seed}
+
+  upscale_image_turbo:
+    # upscale_image with the Qwen Image 2.1 Turbo model at 8 steps (same graph and params).
+    <<: *upscale_image
+    file: "comfyui:api/upscale_image_turbo.json"
+    fallback: upscale_image_turbo.json
+    description: Qwen Image 2.1 Turbo upscale (fast, 8 steps) - re-samples an image at a higher resolution (default 1.5x its size)
 
   generate_asset:
     # From the UI workflow GENERATE_ASSET.json: same generate/edit graph as generate_image, but

@@ -27,8 +27,8 @@ def _client(handler, **settings):
 def test_shipped_workflows_match_the_manifest():
     manifest = load_manifest(REPO_WORKFLOWS)
     fallbacks = [e for e in manifest.workflows.values() if e.fallback]
-    assert {e.name for e in fallbacks} >= {manifest.presets[k] for k in ("image", "asset",
-                                                                          "video", "audio")}
+    assert {e.name for e in fallbacks} >= {manifest.presets[k] for k in (
+        "image", "image_turbo", "asset", "upscale", "upscale_turbo", "video", "audio")}
     for entry in fallbacks:
         raw = json.loads((REPO_WORKFLOWS / entry.fallback).read_text(encoding="utf-8"))
         graph = normalize_graph(raw, entry.name)
@@ -116,7 +116,7 @@ async def test_upscale_off_skips_the_second_sampling_pass():
     manifest = load_manifest(REPO_WORKFLOWS)
     reg = WorkflowRegistry(_client(lambda r: httpx.Response(404)), REPO_WORKFLOWS,
                            include_comfyui=False)
-    for name in ("generate_image", "generate_asset"):
+    for name in ("generate_asset",):
         entry = manifest.workflows[name]
         raw = json.loads((REPO_WORKFLOWS / entry.fallback).read_text(encoding="utf-8"))
         samplers = lambda g: {k for k in _executed(g) if g[k]["class_type"] == "KSampler"}
@@ -127,3 +127,45 @@ async def test_upscale_off_skips_the_second_sampling_pass():
         assert len(samplers(on)) == 2, name
         assert len(samplers(off)) == 1, name
         assert "160" in off  # the base image is still saved
+
+
+TURBO = "qwen_image_2.1_turbo_int8_convrot.safetensors"
+
+
+async def test_image_and_upscale_are_separate_flows():
+    manifest = load_manifest(REPO_WORKFLOWS)
+    reg = WorkflowRegistry(_client(lambda r: httpx.Response(404)), REPO_WORKFLOWS,
+                           include_comfyui=False)
+    cases = {  # workflow -> (params, label of its only output, model)
+        "generate_image": ({"prompt": "a fox"}, "base", None),
+        "generate_image_turbo": ({"prompt": "a fox"}, "base", TURBO),
+        "upscale_image": ({"image": "fox.png", "scale": 2.0}, "upscale", None),
+        "upscale_image_turbo": ({"image": "fox.png"}, "upscale", TURBO),
+    }
+    for name, (params, label, model) in cases.items():
+        entry = manifest.workflows[name]
+        assert list(entry.outputs) == [label], name
+        raw = json.loads((REPO_WORKFLOWS / entry.fallback).read_text(encoding="utf-8"))
+        g, _, _ = await build_graph(reg, entry, params, graph=normalize_graph(raw, name))
+        samplers = [g[k] for k in _executed(g) if g[k]["class_type"] == "KSampler"]
+        assert len(samplers) == 1, name  # a single sampling pass each
+        assert samplers[0]["inputs"]["steps"] == (8 if model else 30), name
+        unet = next(n for n in g.values() if n["class_type"] == "UNETLoader")
+        assert unet["inputs"]["unet_name"] == (model or "qwen_image_2.1_int8_convrot.safetensors")
+        if name.startswith("upscale"):
+            assert g["17"]["inputs"]["image"] == "fox.png"
+            assert g["123"]["inputs"]["images.image_1"] == ["17", 0]
+            assert g["123"]["inputs"]["resolution"] == 0  # encode at the input's own size
+    up = manifest.workflows["upscale_image"]
+    raw = json.loads((REPO_WORKFLOWS / up.fallback).read_text(encoding="utf-8"))
+    g, _, _ = await build_graph(reg, up, {"image": "fox.png", "scale": 2.0},
+                                graph=normalize_graph(raw, "upscale_image"))
+    assert g["155"]["inputs"]["scale_by"] == 2.0
+    for name in ("upscale_image", "upscale_image_turbo"):  # output <= 1536 x scale
+        assert manifest.workflows[name].params["image"].max_side == 1536
+
+
+def test_deploy_workflows_match_the_repo():
+    deploy = REPO_WORKFLOWS.parent / "deploy" / "k8s" / "workflows"
+    for path in REPO_WORKFLOWS.iterdir():
+        assert (deploy / path.name).read_bytes() == path.read_bytes(), path.name

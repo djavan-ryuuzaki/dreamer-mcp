@@ -13,8 +13,9 @@ comfyui:
 
 groups:
   image:
-    title: Images and assets (comfyui_generate_image, comfyui_generate_asset) - Qwen Image 2.1
-    workflows: [api/generate_image.json, api/generate_asset.json]
+    title: Images, assets and upscale (comfyui_generate_image, comfyui_generate_asset, comfyui_upscale) - Qwen Image 2.1
+    workflows: [api/generate_image.json, api/generate_image_turbo.json, api/generate_asset.json,
+                api/upscale_image.json, api/upscale_image_turbo.json]
     nodes:
       - package: ComfyUI
         classes: [TextEncodeQwenImage21, ModelAttentionBackend, PrimitiveStringMultiline]
@@ -31,6 +32,11 @@ groups:
         folder: diffusion_models
         size_gb: 7.3
         url: https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors
+      - file: qwen_image_2.1_turbo_int8_convrot.safetensors
+        folder: diffusion_models
+        size_gb: 7.3
+        url: https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors
+        note: Turbo (8 steps) - comfyui_generate_image / comfyui_upscale with turbo=true
       - file: qwen3vl_8b_int8_convrot.safetensors
         folder: text_encoders
         size_gb: 9.4

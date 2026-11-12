@@ -39,15 +39,23 @@ def transparent_fraction(data: bytes, threshold: int = 16) -> float:
     return sum(hist[:threshold]) / max(1, sum(hist))
 
 
-def flatten(img: Image.Image, color: str) -> bytes:
+def png_bytes(img: Image.Image) -> bytes:
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def flatten_image(img: Image.Image, color: str) -> Image.Image:
     """Composite onto a solid color. ComfyUI's LoadImage drops the alpha channel, so without
     this the model sees whatever RGB happens to sit under the transparent pixels."""
     rgba = img.convert("RGBA")
     board = Image.new("RGBA", rgba.size, ImageColor.getrgb(color))
     board.alpha_composite(rgba)
-    buf = io.BytesIO()
-    board.convert("RGB").save(buf, format="PNG")
-    return buf.getvalue()
+    return board.convert("RGB")
+
+
+def flatten(img: Image.Image, color: str) -> bytes:
+    return png_bytes(flatten_image(img, color))
 
 
 def fit_size(size: tuple[int, int], max_side: int) -> tuple[int, int]:
@@ -55,6 +63,16 @@ def fit_size(size: tuple[int, int], max_side: int) -> tuple[int, int]:
     w, h = size
     scale = min(1.0, max_side / max(w, h))
     return max(1, round(w * scale)), max(1, round(h * scale))
+
+
+def shrink_image(img: Image.Image, max_side: int) -> Image.Image:
+    """Downscale (Lanczos) so the longest side is at most max_side; smaller images are
+    returned unchanged."""
+    if max(img.size) <= max_side:
+        return img
+    if img.mode not in ("RGB", "RGBA", "L", "LA"):
+        img = img.convert("RGBA" if has_alpha(img) else "RGB")
+    return img.resize(fit_size(img.size, max_side), Image.Resampling.LANCZOS)
 
 
 def parse_aspect_ratio(value: object) -> float:

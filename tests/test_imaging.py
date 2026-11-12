@@ -136,3 +136,30 @@ async def test_size_rule_precedence(tmp_path: Path):
     assert await size(images=["a.png"], aspect_ratio="16:9", width=640) == (640, 1024)  # explicit
     with pytest.raises(WorkflowError, match="aspect ratio"):
         await size(aspect_ratio="wide")
+
+
+def test_shrink_image_only_downscales():
+    big = Image.new("RGB", (3000, 1500))
+    assert imaging.shrink_image(big, 1536).size == (1536, 768)
+    small = Image.new("RGB", (800, 600))
+    assert imaging.shrink_image(small, 1536) is small
+    assert imaging.shrink_image(Image.new("P", (2000, 1000)), 1000).size == (1000, 500)
+
+
+async def test_file_max_side_scales_large_inputs_down(tmp_path: Path):
+    graph = {"1": {"class_type": "LoadImage", "_meta": {"title": "[$IMG]"}, "inputs": {"image": "x"}}}
+    entry = WorkflowEntry(name="up", file="", params={
+        "image": ParamSpec(targets=["[$IMG].image"], type="file", flatten_alpha="#fff", max_side=800),
+    })
+    fake = _Comfy()  # every ComfyUI file is a 1000x750 transparent sprite
+    reg = WorkflowRegistry(client=fake, workflows_dir=tmp_path, include_comfyui=False)
+
+    g, applied, _ = await build_graph(reg, entry, {"image": "big.png"}, graph=graph)
+    uploaded = Image.open(io.BytesIO(fake.uploads[g["1"]["inputs"]["image"]]))
+    assert uploaded.size == (800, 600) and uploaded.mode == "RGB"  # flattened, then shrunk
+    assert applied["image_resized"] == "1000x750 -> 800x600"
+
+    entry.params["image"].max_side = 1536  # already small enough: only flattened
+    g, applied, _ = await build_graph(reg, entry, {"image": "big.png"}, graph=graph)
+    assert Image.open(io.BytesIO(fake.uploads[g["1"]["inputs"]["image"]])).size == (1000, 750)
+    assert "image_resized" not in applied
