@@ -124,6 +124,22 @@ class MediaLinks:
             result["player"] = f"{base}/player"
         return result
 
+    def comfy_ref(self, value: str) -> str | None:
+        """For a link this server signed (e.g. the `url` of a previous output passed back as an
+        input), the ComfyUI file it points to as "<subfolder>/<name> [<type>]", which LoadImage
+        accepts. Inputs are then read from ComfyUI directly instead of fetched back through
+        MCP_PUBLIC_URL, which the server itself may not be able to reach (in-cluster DNS)."""
+        if not self.proxied:
+            return None
+        prefix = f"{self.settings.mcp_public_url}{MEDIA_PREFIX}"
+        if not value.startswith(prefix):
+            return None
+        ref = self.signer.verify(value[len(prefix):].split("/", 1)[0])
+        if ref is None:
+            return None
+        path = f"{ref.subfolder}/{ref.filename}" if ref.subfolder else ref.filename
+        return f"{path} [{ref.type}]"
+
 
 # --- HTTP handlers ---------------------------------------------------------------------------
 

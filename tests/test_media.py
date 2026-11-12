@@ -3,9 +3,10 @@ import time
 import httpx
 import pytest
 
+from dreamer_mcp import client as client_module
 from dreamer_mcp import server
 from dreamer_mcp.__main__ import BearerAuthMiddleware
-from dreamer_mcp.client import ComfyClient
+from dreamer_mcp.client import ComfyClient, ComfyUIError
 from dreamer_mcp.config import Settings
 from dreamer_mcp.media import MediaLinks, MediaSigner
 
@@ -76,3 +77,34 @@ async def test_rejects_bad_links_and_keeps_mcp_protected(app):
     links = server.media().links("clip.mp4", "video", "output")
     assert (await app.get(links["url"].replace("/media/", "/media/x"))).status_code == 403
     assert (await app.post("/mcp", json={})).status_code == 401
+
+
+def test_own_links_resolve_to_comfyui_files(monkeypatch):
+    settings = Settings(comfyui_url="http://comfy:8188", mcp_transport="http",
+                        mcp_public_url="https://mcp.example", mcp_auth_token="tok")
+    client = ComfyClient(settings, transport=httpx.MockTransport(fake_view))
+    links = MediaLinks(settings, client, MediaSigner.from_settings(settings))
+    url = links.links("GEN_00001_.png", "dreamer-mcp", "output")["url"]
+    assert links.comfy_ref(url) == "dreamer-mcp/GEN_00001_.png [output]"
+    assert links.comfy_ref(links.links("a.png", "", "temp")["url"]) == "a.png [temp]"
+    assert links.comfy_ref("https://elsewhere.example/media/x/a.png") is None
+    token = url.split("/media/")[1].split("/")[0]
+    assert links.comfy_ref(url.replace(token, token[:-2] + "xx")) is None  # bad signature
+
+    monkeypatch.setattr(server, "_media", links)
+    params = {"image": url, "images": [url, "b.png"], "scale": 1.5}
+    assert server._own_media_refs(params) == {
+        "image": "dreamer-mcp/GEN_00001_.png [output]",
+        "images": ["dreamer-mcp/GEN_00001_.png [output]", "b.png"], "scale": 1.5}
+
+
+async def test_download_errors_are_readable(monkeypatch):
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("Name or service not known", request=request)
+
+    client = ComfyClient(Settings(comfyui_url="http://comfy:8188"))
+    real = httpx.AsyncClient
+    monkeypatch.setattr(client_module.httpx, "AsyncClient",
+                        lambda **kw: real(transport=httpx.MockTransport(refuse), **kw))
+    with pytest.raises(ComfyUIError, match="Cannot download http://x.local/a.png: ConnectError"):
+        await client.fetch_url("http://x.local/a.png?sig=1")

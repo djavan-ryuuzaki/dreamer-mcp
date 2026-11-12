@@ -312,6 +312,18 @@ async def _previews(outputs: list[dict], limit: int = 4) -> list[Image]:
     return images
 
 
+def _own_media_refs(params: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Swap links to this server's /media/ (a previous output's `url`) for the ComfyUI file
+    they point to, so they are not downloaded back through MCP_PUBLIC_URL."""
+    if not params:
+        return params
+
+    def one(v: Any) -> Any:
+        return (media().comfy_ref(v) or v) if isinstance(v, str) else v
+
+    return {k: [one(x) for x in v] if isinstance(v, list) else one(v) for k, v in params.items()}
+
+
 async def _execute(
     workflow: str | None,
     *,
@@ -333,7 +345,8 @@ async def _execute(
         raise ToolError("Provide either 'workflow' (a name from comfyui_workflows) or 'workflow_json'.")
 
     graph, applied, ignored = await build_graph(
-        reg, entry, params=params, overrides=inputs, randomize=randomize_seed, graph=graph
+        reg, entry, params=_own_media_refs(params), overrides=inputs, randomize=randomize_seed,
+        graph=graph,
     )
     _prepare_audio_format(entry, graph, applied)
     score_out = await _prepare_score(entry, graph, params or {})
@@ -926,9 +939,10 @@ async def comfyui_upload_file(source: str) -> dict[str, Any]:
     """Upload an image/audio/video into ComfyUI's input folder, for use in Load* nodes.
 
     Args:
-        source: An http(s) URL, a data: URI or raw base64 content.
+        source: An http(s) URL, a data: URI or raw base64 content. A `url` returned by this
+            server for an output is used in place, as "<subfolder>/<name> [output]".
     """
-    name = await upload_input_file(client(), source)
+    name = media().comfy_ref(source) or await upload_input_file(client(), source)
     return {"filename": name, "hint": "Use this value in a LoadImage/LoadAudio/LoadVideo input."}
 
 
