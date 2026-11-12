@@ -135,10 +135,15 @@ class ComfyClient:
             raise
 
     async def fetch_url(self, url: str) -> bytes:
-        async with httpx.AsyncClient(timeout=self.settings.comfyui_timeout, follow_redirects=True) as c:
-            resp = await c.get(url)
-            resp.raise_for_status()
-            return resp.content
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.comfyui_timeout,
+                                         follow_redirects=True) as c:
+                resp = await c.get(url)
+                resp.raise_for_status()
+                return resp.content
+        except httpx.HTTPError as e:
+            raise ComfyUIError(f"Cannot download {url.split('?')[0]}: "
+                               f"{type(e).__name__}: {e}") from e
 
     # --- helpers -----------------------------------------------------------------------------
 
